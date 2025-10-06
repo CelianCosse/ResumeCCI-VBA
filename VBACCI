@@ -38,6 +38,7 @@ Sub ResumerCCI()
     Dim dictAllDirByID As Object, dictOldAllDirByID As Object
     Dim dirCanon As String
 
+
     ' Étape 1 : Ouvrir explorateur pour sélectionner le fichier source CCI
     FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
     If FileNameCCI = "False" Then Exit Sub
