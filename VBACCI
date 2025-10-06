@@ -10,6 +10,23 @@ Sub ResumerCCI()
     Dim key As Variant, valeur As Variant, montant As Variant
     Dim colSIREN As Long, colSOC As Long
 
+    ' Ajouts pour feuille ComparatifDirigeants
+    Dim wsComp As Worksheet
+    Dim FileNameOldCCI As String
+    Dim wbOld As Workbook
+    Dim wsEntOld As Worksheet, wsDirOld As Worksheet, wsGarOld As Worksheet, wsAssOld As Worksheet
+    Dim lastRowEntOld As Long, lastRowDirOld As Long, lastRowGarOld As Long, lastRowAssOld As Long
+    Dim dictEntOld As Object, dictDirOld As Object, dictGarOld As Object, dictMontOld As Object
+    Dim dictDirSocCount As Object, dictDirTotalGF As Object, dictDirGarantFreq As Object
+    Dim dictOldDirSocCount As Object, dictOldDirTotalGF As Object
+    Dim allDirNames As Object
+    Dim hasOld As Boolean
+    Dim dirName As String, garantName As String
+    Dim subDict As Object
+    Dim maxCount As Long
+    Dim maxGarant As String
+    Dim rowIndex As Long
+
     ' Étape 1 : Ouvrir explorateur pour sélectionner le fichier source CCI
     FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
     If FileNameCCI = "False" Then Exit Sub
@@ -191,8 +208,247 @@ Sub ResumerCCI()
     wsTarget.Columns("G:G").NumberFormat = "#,##0, ""K€"""
 
     wsTarget.Columns.AutoFit
+
+    ' ==============================
+    ' Construire la feuille ComparatifDirigeants
+    ' ==============================
+
+    ' Agrégats actuels par dirigeant (comptes, montants, garant principal)
+    Set dictDirSocCount = CreateObject("Scripting.Dictionary")
+    Set dictDirTotalGF = CreateObject("Scripting.Dictionary")
+    Set dictDirGarantFreq = CreateObject("Scripting.Dictionary") ' Dirigeant -> (Garant -> Count)
+
+    For Each key In dictEnt.Keys
+        If dictDir.Exists(key) Then
+            dirName = Trim(CStr(dictDir(key)))
+            If Len(dirName) > 0 Then
+                If Not dictDirSocCount.Exists(dirName) Then dictDirSocCount.Add dirName, 0
+                dictDirSocCount(dirName) = dictDirSocCount(dirName) + 1
+
+                If Not dictDirTotalGF.Exists(dirName) Then dictDirTotalGF.Add dirName, 0#
+                If dictMont.Exists(key) Then
+                    If IsNumeric(dictMont(key)) Then dictDirTotalGF(dirName) = CDbl(dictDirTotalGF(dirName)) + CDbl(dictMont(key))
+                End If
+
+                If Not dictDirGarantFreq.Exists(dirName) Then Set dictDirGarantFreq(dirName) = CreateObject("Scripting.Dictionary")
+                If dictGar.Exists(key) Then
+                    garantName = CStr(dictGar(key))
+                    If Not dictDirGarantFreq(dirName).Exists(garantName) Then dictDirGarantFreq(dirName).Add garantName, 0
+                    dictDirGarantFreq(dirName)(garantName) = dictDirGarantFreq(dirName)(garantName) + 1
+                End If
+            End If
+        End If
+    Next key
+
+    ' Agrégats anciens (optionnels) par dirigeant
+    hasOld = False
+    FileNameOldCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez l'ancien fichier CCI (optionnel)")
+    If Not (FileNameOldCCI = "False") Then
+        On Error Resume Next
+        Set wbOld = Workbooks.Open(FileNameOldCCI)
+        On Error GoTo 0
+        If Not wbOld Is Nothing Then
+            hasOld = True
+
+            ' Feuilles source anciennes
+            Set wsEntOld = wbOld.Sheets("Entreprise")
+            Set wsDirOld = wbOld.Sheets("Dirigeant")
+            Set wsGarOld = wbOld.Sheets("Garant")
+            Set wsAssOld = wbOld.Sheets("Assureur")
+
+            lastRowEntOld = wsEntOld.Cells(wsEntOld.Rows.Count, 1).End(xlUp).Row
+            lastRowDirOld = wsDirOld.Cells(wsDirOld.Rows.Count, 1).End(xlUp).Row
+            lastRowGarOld = wsGarOld.Cells(wsGarOld.Rows.Count, 1).End(xlUp).Row
+            lastRowAssOld = wsAssOld.Cells(wsAssOld.Rows.Count, 1).End(xlUp).Row
+
+            ' Dictionnaires anciens
+            Set dictEntOld = CreateObject("Scripting.Dictionary")
+            Set dictDirOld = CreateObject("Scripting.Dictionary")
+            Set dictGarOld = CreateObject("Scripting.Dictionary")
+            Set dictMontOld = CreateObject("Scripting.Dictionary")
+
+            ' Map entreprises anciennes
+            For i = 2 To lastRowEntOld
+                key = wsEntOld.Cells(i, 1).Value
+                If Not dictEntOld.Exists(key) Then
+                    dictEntOld.Add key, Array(wsEntOld.Cells(i, 10).Value, wsEntOld.Cells(i, 8).Value) ' Société, SIREN
+                End If
+            Next i
+
+            ' Map dirigeants anciens
+            For i = 2 To lastRowDirOld
+                key = wsDirOld.Cells(i, 2).Value
+                If Not dictDirOld.Exists(key) Then
+                    valeur = wsDirOld.Cells(i, 3).Value & " " & LCase(wsDirOld.Cells(i, 5).Value)
+                    dictDirOld.Add key, valeur
+                End If
+            Next i
+
+            ' Map garants et montants anciens (avec mêmes homonymes)
+            For i = 2 To lastRowGarOld
+                key = wsGarOld.Cells(i, 2).Value
+                Dim oldGarant As String
+                oldGarant = UCase(wsGarOld.Cells(i, 3).Value)
+
+                For Each cleHom In dictHom.Keys
+                    If InStr(1, oldGarant, cleHom, vbTextCompare) > 0 Then
+                        oldGarant = dictHom(cleHom)
+                        Exit For
+                    End If
+                Next cleHom
+
+                If Not dictGarOld.Exists(key) Then dictGarOld.Add key, oldGarant
+                If Not dictMontOld.Exists(key) Then dictMontOld.Add key, 0
+
+                montant = wsGarOld.Cells(i, 5).Value
+                If IsNumeric(montant) Then dictMontOld(key) = dictMontOld(key) + CDbl(montant)
+            Next i
+
+            ' (Assureurs anciens non nécessaires pour ce comparatif)
+
+            ' Agrégats anciens par dirigeant
+            Set dictOldDirSocCount = CreateObject("Scripting.Dictionary")
+            Set dictOldDirTotalGF = CreateObject("Scripting.Dictionary")
+
+            For Each key In dictEntOld.Keys
+                If dictDirOld.Exists(key) Then
+                    dirName = Trim(CStr(dictDirOld(key)))
+                    If Len(dirName) > 0 Then
+                        If Not dictOldDirSocCount.Exists(dirName) Then dictOldDirSocCount.Add dirName, 0
+                        dictOldDirSocCount(dirName) = dictOldDirSocCount(dirName) + 1
+
+                        If Not dictOldDirTotalGF.Exists(dirName) Then dictOldDirTotalGF.Add dirName, 0#
+                        If dictMontOld.Exists(key) Then
+                            If IsNumeric(dictMontOld(key)) Then dictOldDirTotalGF(dirName) = CDbl(dictOldDirTotalGF(dirName)) + CDbl(dictMontOld(key))
+                        End If
+                    End If
+                End If
+            Next key
+
+            wbOld.Close SaveChanges:=False
+        End If
+    End If
+
+    ' Construire l'ensemble des dirigeants (union actuel + ancien si présent)
+    Set allDirNames = CreateObject("Scripting.Dictionary")
+    If Not dictDirSocCount Is Nothing Then
+        For Each key In dictDirSocCount.Keys
+            If Not allDirNames.Exists(key) Then allDirNames.Add key, True
+        Next key
+    End If
+    If hasOld Then
+        If Not dictOldDirSocCount Is Nothing Then
+            For Each key In dictOldDirSocCount.Keys
+                If Not allDirNames.Exists(key) Then allDirNames.Add key, True
+            Next key
+        End If
+    End If
+
+    ' Créer la feuille de comparatif
+    Set wsComp = wbTarget.Sheets.Add(After:=wsTarget)
+    wsComp.Name = "ComparatifDirigeants"
+    wsComp.Cells(1, 1).Resize(1, 6).Value = Array("Dirigeant", "Total sociétés", "Garant principal", "Mouvement société", "Montant total GF", "Mouvement GF")
+
+    ' Remplir les données ligne à ligne
+    rowIndex = 2
+    For Each key In allDirNames.Keys
+        dirName = CStr(key)
+
+        ' Total sociétés actuel
+        Dim currSoc As Long
+        Dim oldSoc As Long
+        Dim currGF As Double
+        Dim oldGF As Double
+        Dim mouvementSoc As Long
+        Dim mouvementGF As Double
+
+        If dictDirSocCount.Exists(dirName) Then currSoc = CLng(dictDirSocCount(dirName)) Else currSoc = 0
+        If hasOld And Not dictOldDirSocCount Is Nothing Then
+            If dictOldDirSocCount.Exists(dirName) Then oldSoc = CLng(dictOldDirSocCount(dirName)) Else oldSoc = 0
+        Else
+            oldSoc = 0
+        End If
+        mouvementSoc = currSoc - oldSoc
+
+        If dictDirTotalGF.Exists(dirName) Then currGF = CDbl(dictDirTotalGF(dirName)) Else currGF = 0#
+        If hasOld And Not dictOldDirTotalGF Is Nothing Then
+            If dictOldDirTotalGF.Exists(dirName) Then oldGF = CDbl(dictOldDirTotalGF(dirName)) Else oldGF = 0#
+        Else
+            oldGF = 0#
+        End If
+        mouvementGF = currGF - oldGF
+
+        ' Garant principal actuel (par fréquence)
+        maxCount = -1
+        maxGarant = ""
+        If dictDirGarantFreq.Exists(dirName) Then
+            Set subDict = dictDirGarantFreq(dirName)
+            For Each valeur In subDict.Keys
+                If subDict(valeur) > maxCount Then
+                    maxCount = subDict(valeur)
+                    maxGarant = CStr(valeur)
+                End If
+            Next valeur
+        End If
+
+        wsComp.Cells(rowIndex, 1).Value = dirName
+        wsComp.Cells(rowIndex, 2).Value = currSoc
+        wsComp.Cells(rowIndex, 3).Value = maxGarant
+        wsComp.Cells(rowIndex, 4).Value = mouvementSoc
+        wsComp.Cells(rowIndex, 5).Value = currGF
+        wsComp.Cells(rowIndex, 6).Value = mouvementGF
+
+        rowIndex = rowIndex + 1
+    Next key
+
+    ' Mise en forme tableau
+    Dim compRange As Range
+    Set compRange = wsComp.Range("A1").CurrentRegion
+    wsComp.ListObjects.Add(xlSrcRange, compRange, , xlYes).Name = "TableauComparatifDirigeants"
+
+    ' Formats
+    wsComp.Columns("B:B").NumberFormat = "0"                    ' Total sociétés
+    wsComp.Columns("D:D").NumberFormat = "0"                    ' Mouvement société
+    wsComp.Columns("E:E").NumberFormat = "#,##0, ""K€"""       ' Montant total GF
+    wsComp.Columns("F:F").NumberFormat = "#,##0, ""K€"""       ' Mouvement GF
+
+    ' Alignements
+    wsComp.Columns("B:B").HorizontalAlignment = xlCenter
+    wsComp.Columns("D:D").HorizontalAlignment = xlCenter
+
+    ' Mise en forme conditionnelle pour mouvements
+    Dim lastRowComp As Long
+    lastRowComp = wsComp.Cells(wsComp.Rows.Count, 1).End(xlUp).Row
+    If lastRowComp >= 2 Then
+        Dim rngMovSoc As Range, rngMovGF As Range
+        Set rngMovSoc = wsComp.Range("D2:D" & lastRowComp)
+        Set rngMovGF = wsComp.Range("F2:F" & lastRowComp)
+
+        ' Mouvement société: >0 vert, <0 rouge
+        With rngMovSoc.FormatConditions.Add(Type:=xlCellValue, Operator:=xlGreater, Formula1:="0")
+            .Interior.Color = RGB(198, 239, 206) ' vert léger
+            .Font.Color = RGB(0, 97, 0)
+        End With
+        With rngMovSoc.FormatConditions.Add(Type:=xlCellValue, Operator:=xlLess, Formula1:="0")
+            .Interior.Color = RGB(255, 199, 206) ' rouge léger
+            .Font.Color = RGB(156, 0, 6)
+        End With
+
+        ' Mouvement GF: >0 vert, <0 rouge
+        With rngMovGF.FormatConditions.Add(Type:=xlCellValue, Operator:=xlGreater, Formula1:="0")
+            .Interior.Color = RGB(198, 239, 206)
+            .Font.Color = RGB(0, 97, 0)
+        End With
+        With rngMovGF.FormatConditions.Add(Type:=xlCellValue, Operator:=xlLess, Formula1:="0")
+            .Interior.Color = RGB(255, 199, 206)
+            .Font.Color = RGB(156, 0, 6)
+        End With
+    End If
+
+    wsComp.Columns.AutoFit
+
     wbTarget.Activate  ' Active le nouveau classeur
-    MsgBox "Résumé créé et ouvert dans un nouveau classeur."
+    MsgBox "Résumé et comparatif créés et ouverts dans un nouveau classeur."
     wbSource.Close SaveChanges:=False
 
 End Sub
