@@ -507,8 +507,67 @@ Sub ResumerCCI()
 
     wsComp.Columns.AutoFit
 
+    ' ==============================
+    ' Feuille de trace pour audit (IDs, dirigeants et principaux)
+    ' ==============================
+    Dim wsTrace As Worksheet
+    Dim allIds As Object
+    Dim idKey2 As Variant
+    Dim currDirList As String, oldDirList As String
+    Dim traceRow As Long
+
+    Set wsTrace = wbTarget.Sheets.Add(After:=wsComp)
+    wsTrace.Name = "TraceDirigeants"
+    wsTrace.Cells(1, 1).Resize(1, 7).Value = Array("ID", "Dirigeants (actuel)", "Principal (actuel)", "GF (actuel)", "Dirigeants (ancien)", "Principal (ancien)", "GF (ancien)")
+
+    Set allIds = CreateObject("Scripting.Dictionary")
+    For Each key In dictEnt.Keys
+        If Not allIds.Exists(key) Then allIds.Add key, True
+    Next key
+    If hasOld Then
+        For Each key In dictEntOld.Keys
+            If Not allIds.Exists(key) Then allIds.Add key, True
+        Next key
+    End If
+
+    traceRow = 2
+    For Each idKey2 In allIds.Keys
+        wsTrace.Cells(traceRow, 1).Value = idKey2
+
+        currDirList = ""
+        If Not dictAllDirByID Is Nothing Then
+            If dictAllDirByID.Exists(idKey2) Then
+                currDirList = JoinDictValues(dictAllDirByID(idKey2))
+            End If
+        End If
+        wsTrace.Cells(traceRow, 2).Value = currDirList
+        If dictDirPrimary.Exists(idKey2) Then wsTrace.Cells(traceRow, 3).Value = dictDirPrimary(idKey2)
+        If dictMont.Exists(idKey2) Then wsTrace.Cells(traceRow, 4).Value = dictMont(idKey2)
+
+        oldDirList = ""
+        If hasOld Then
+            If Not dictOldAllDirByID Is Nothing Then
+                If dictOldAllDirByID.Exists(idKey2) Then oldDirList = JoinDictValues(dictOldAllDirByID(idKey2))
+            End If
+            wsTrace.Cells(traceRow, 5).Value = oldDirList
+            If Not dictOldDirPrimary Is Nothing Then
+                If dictOldDirPrimary.Exists(idKey2) Then wsTrace.Cells(traceRow, 6).Value = dictOldDirPrimary(idKey2)
+            End If
+            If dictMontOld.Exists(idKey2) Then wsTrace.Cells(traceRow, 7).Value = dictMontOld(idKey2)
+        End If
+
+        traceRow = traceRow + 1
+    Next idKey2
+
+    Dim traceRange As Range
+    Set traceRange = wsTrace.Range("A1").CurrentRegion
+    wsTrace.ListObjects.Add(xlSrcRange, traceRange, , xlYes).Name = "TableauTraceDirigeants"
+    wsTrace.Columns("D:D").NumberFormat = "#,##0, ""K€"""
+    wsTrace.Columns("G:G").NumberFormat = "#,##0, ""K€"""
+    wsTrace.Columns.AutoFit
+
     wbTarget.Activate  ' Active le nouveau classeur
-    MsgBox "Résumé et comparatif créés et ouverts dans un nouveau classeur."
+    MsgBox "Résumé, comparatif et trace créés et ouverts dans un nouveau classeur."
     wbSource.Close SaveChanges:=False
 
 End Sub
