@@ -1,0 +1,583 @@
+Sub ResumerCCI()
+
+    Dim FileNameCCI As String, FileNamePortefeuille As String
+    Dim wbSource As Workbook, wbPortefeuille As Workbook, wbTarget As Workbook
+    Dim wsEnt As Worksheet, wsDir As Worksheet, wsGar As Worksheet, wsAss As Worksheet, wsBaseCA As Worksheet, wsTarget As Worksheet
+    Dim dictEnt As Object, dictDir As Object, dictGar As Object, dictMont As Object, dictAss As Object, dictSoc As Object
+    Dim dictHom As Object
+    Dim lastRowEnt As Long, lastRowDir As Long, lastRowGar As Long, lastRowAss As Long, lastRowBaseCA As Long
+    Dim i As Long, j As Long
+    Dim key As Variant, valeur As Variant, montant As Variant
+    Dim colSIREN As Long, colSOC As Long
+
+    ' Étape 1 : Ouvrir explorateur pour sélectionner le fichier source CCI
+    FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
+    If FileNameCCI = "False" Then Exit Sub
+    Set wbSource = workbooks.Open(FileNameCCI)
+
+    ' Feuilles source
+    Set wsEnt = wbSource.Sheets("Entreprise")
+    Set wsDir = wbSource.Sheets("Dirigeant")
+    Set wsGar = wbSource.Sheets("Garant")
+    Set wsAss = wbSource.Sheets("Assureur")
+
+    ' Dernières lignes
+    lastRowEnt = wsEnt.Cells(wsEnt.Rows.Count, 1).End(xlUp).Row
+    lastRowDir = wsDir.Cells(wsDir.Rows.Count, 1).End(xlUp).Row
+    lastRowGar = wsGar.Cells(wsGar.Rows.Count, 1).End(xlUp).Row
+    lastRowAss = wsAss.Cells(wsAss.Rows.Count, 1).End(xlUp).Row
+
+    ' Créer les dictionnaires
+    Set dictEnt = CreateObject("Scripting.Dictionary")
+    Set dictDir = CreateObject("Scripting.Dictionary")
+    Set dictGar = CreateObject("Scripting.Dictionary")
+    Set dictMont = CreateObject("Scripting.Dictionary")
+    Set dictAss = CreateObject("Scripting.Dictionary")
+    Set dictHom = CreateObject("Scripting.Dictionary")
+
+    ' Remplacements pour homonymes (ajoutez/modifiez manuellement ici)
+    With dictHom
+        .Add "GAL", "GALIAN-SMABTP"
+        .Add "GAILIAN", "GALIAN-SMABTP"
+        .Add "MMA", "MMA"
+        .Add "ALLIANZ", "ALLIANZ"
+        .Add "AXA", "AXA"
+        .Add "SO C", "SOCAF"
+        .Add "SO.", "SOCAF"
+        .Add "SOCA", "SOCAF"
+        .Add "SOCIETE DE CAUTION", "SOCAF"
+        .Add "SOCIÉTÉ DE CAUTION", "SOCAF"
+        .Add "QBE", "QBE"
+        .Add "GROUPAMA", "GROUPAMA"
+        .Add "GENERALI", "GENERALI"
+        .Add "CEGC", "CEGC"
+        .Add "COMPAGNIE EUR", "CEGC"
+        .Add "COMPANIE EUR", "CEGC"
+        .Add "LLOYD", "LLOYDS"
+        .Add "GROUPEMENT FRANCAIS", "GFC"
+        .Add "GFC", "GFC"
+        .Add "SMA", "GALIAN-SMABTP"
+        .Add "CIC", "CIC"
+        .Add "CREDIT IND", "CIC"
+        .Add "CAISSE FEDERALE", "CREDIT MUTUEL"
+        .Add " LACAISSE FEDERALE", "CREDIT MUTUEL"
+        .Add "CAISSE R", "CREDIT AGRICOLE"
+        .Add "(CAMCA", "CREDIT AGRICOLE"
+        .Add "CREDIT AGRICOLE", "CREDIT AGRICOLE"
+        .Add "CAISSE D'ASSURANCES MUTUELLES DU CREDIT AGRICOLE", "CREDIT AGRICOLE"
+        .Add "CAISSE D'EPARGNE", "CAISSE D'EPARGNE"
+    End With
+
+    ' Map entreprises (Société = Dénomination en colonne 9)
+    For i = 2 To lastRowEnt
+        key = wsEnt.Cells(i, 1).Value
+        If Not dictEnt.Exists(key) Then
+            dictEnt.Add key, Array(wsEnt.Cells(i, 10).Value, wsEnt.Cells(i, 8).Value)  ' Société, SIREN
+        End If
+    Next i
+
+    ' Map dirigeants
+    For i = 2 To lastRowDir
+        key = wsDir.Cells(i, 2).Value
+        If Not dictDir.Exists(key) Then
+            valeur = wsDir.Cells(i, 3).Value & " " & LCase(wsDir.Cells(i, 5).Value)
+            dictDir.Add key, valeur
+        End If
+    Next i
+
+    ' Map garants et montants
+    For i = 2 To lastRowGar
+        key = wsGar.Cells(i, 2).Value ' Identifiant
+        Dim nomGarant As String
+        nomGarant = UCase(wsGar.Cells(i, 3).Value) ' Nom du garant à normaliser
+    
+        ' Appliquer remplacement par recherche de mot-clé partiel
+        For Each cleHom In dictHom.Keys
+            If InStr(1, nomGarant, cleHom, vbTextCompare) > 0 Then
+                nomGarant = dictHom(cleHom)
+                Exit For
+            End If
+        Next cleHom
+    
+        ' Stocke unique (premier trouvé après remplacement)
+        If Not dictGar.Exists(key) Then
+            dictGar.Add key, nomGarant
+        End If
+    
+        ' Initialiser le montant si nécessaire
+        If Not dictMont.Exists(key) Then dictMont.Add key, 0
+    
+        ' Traitement du montant
+        montant = wsGar.Cells(i, 5).Value
+        If IsNumeric(montant) Then
+            dictMont(key) = dictMont(key) + CDbl(montant)
+        End If
+    Next i
+
+    ' Map assureurs (ne garder que le premier)
+    For i = 2 To lastRowAss
+        key = wsAss.Cells(i, 2).Value
+        valeur = wsAss.Cells(i, 3).Value
+        If Not dictAss.Exists(key) Then
+            dictAss.Add key, valeur
+        End If
+        ' Sinon on ignore les suivants
+    Next i
+
+    ' Étape 2 : Ouvrir explorateur pour sélectionner le fichier portefeuille
+    FileNamePortefeuille = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le fichier portefeuille client")
+    If FileNamePortefeuille = "False" Then
+        MsgBox "Aucun fichier portefeuille sélectionné. N° sociétaire restera vide."
+    Else
+        Set wbPortefeuille = workbooks.Open(FileNamePortefeuille)
+        Set wsBaseCA = wbPortefeuille.Sheets("Base CA")
+        lastRowBaseCA = wsBaseCA.Cells(wsBaseCA.Rows.Count, 1).End(xlUp).Row
+
+        ' Trouver colonnes SOC et SIREN
+        colSOC = 0: colSIREN = 0
+        For i = 1 To wsBaseCA.Cells(1, Columns.Count).End(xlToLeft).Column
+            If UCase(Trim(wsBaseCA.Cells(1, i).Value)) = "SOC" Then colSOC = i
+            If UCase(Trim(wsBaseCA.Cells(1, i).Value)) = "SIREN" Then colSIREN = i
+        Next i
+
+        If colSOC = 0 Or colSIREN = 0 Then
+            MsgBox "Colonnes 'SOC' ou 'SIREN' non trouvées dans 'Base CA'. N° sociétaire restera vide."
+        Else
+            Set dictSoc = CreateObject("Scripting.Dictionary")
+            For i = 2 To lastRowBaseCA
+                key = wsBaseCA.Cells(i, colSIREN).Value
+                If Not dictSoc.Exists(key) Then
+                    dictSoc.Add key, wsBaseCA.Cells(i, colSOC).Value
+                End If
+            Next i
+        End If
+        wbPortefeuille.Close SaveChanges:=False
+    End If
+
+    ' Créer et ouvrir un nouveau classeur pour le résumé
+    Set wbTarget = workbooks.Add
+    Set wsTarget = wbTarget.Sheets(1)
+    wsTarget.Name = "ResumeCCI"
+    wsTarget.Cells(1, 1).Resize(1, 8).Value = Array("ID", "N° sociétaire", "Société", "SIREN", "Dirigeant", "Garant", "Montant GF", "Assureur")
+
+    ' Remplir les données
+    j = 2
+    For Each key In dictEnt.Keys
+        wsTarget.Cells(j, 1).Value = key
+        wsTarget.Cells(j, 4).Value = dictEnt(key)(1)  ' SIREN
+        If Not dictSoc Is Nothing And dictSoc.Exists(wsTarget.Cells(j, 4).Value) Then
+            wsTarget.Cells(j, 2).Value = dictSoc(wsTarget.Cells(j, 4).Value)  ' N° sociétaire
+        Else
+            wsTarget.Cells(j, 2).Value = "NA"
+        End If
+        wsTarget.Cells(j, 3).Value = dictEnt(key)(0)  ' Société
+        If dictDir.Exists(key) Then wsTarget.Cells(j, 5).Value = dictDir(key)
+        If dictGar.Exists(key) Then wsTarget.Cells(j, 6).Value = dictGar(key)
+        If dictMont.Exists(key) Then wsTarget.Cells(j, 7).Value = dictMont(key)
+        If dictAss.Exists(key) Then wsTarget.Cells(j, 8).Value = dictAss(key)
+        j = j + 1
+    Next
+
+    ' Mise en forme de tableau
+    Dim tblRange As Range
+    Set tblRange = wsTarget.Range("A1").CurrentRegion
+    wsTarget.ListObjects.Add(xlSrcRange, tblRange, , xlYes).Name = "TableauResume"
+
+    ' Centrer colonnes B (N° sociétaire) et D (SIREN)
+    wsTarget.Columns("B:B").HorizontalAlignment = xlCenter
+    wsTarget.Columns("D:D").HorizontalAlignment = xlCenter
+
+    ' Format comptabilité pour colonne G (Montant GF)
+    wsTarget.Columns("G:G").NumberFormat = "#,##0, ""K€"""
+
+    wsTarget.Columns.AutoFit
+    wbTarget.Activate  ' Active le nouveau classeur
+    MsgBox "Résumé créé et ouvert dans un nouveau classeur."
+    wbSource.Close SaveChanges:=False
+
+End Sub
+
+Sub ResumeDirigeants()
+
+    Dim wsSource As Worksheet
+    Dim wsDest As Worksheet
+    Dim dictDirigeants As Object
+    Dim dictGarants As Object
+    Dim lastRow As Long
+    Dim i As Long
+    Dim dirigeant As String
+    Dim garant As String
+    Dim montantGF As Double
+    Dim key As Variant
+    Dim subKey As Variant
+    Dim maxGarant As String
+    Dim maxCount As Long
+    Dim rowDest As Long
+    Dim tbl As ListObject
+    Dim tblRange As Range
+    
+    Dim FileNamePrev As String
+    Dim wbPrecedent As Workbook
+    Dim wsPrevResume As Worksheet
+    Dim lastRowPrev As Long
+    Dim dictPrecedent As Object
+    Dim prevArr As Variant, diffSoc As Long, diffGF As Double
+    Dim response As VbMsgBoxResult
+    Dim noCompare As Boolean
+    
+    ' Définir les feuilles actuelles
+    Set wsSource = ActiveWorkbook.Sheets("ResumeCCI")
+    
+    ' Demander à l'utilisateur s'il veut comparer
+    response = MsgBox("Voulez-vous ouvrir un fichier de comparaison ?", vbYesNo + vbQuestion, "Comparaison")
+    noCompare = (response = vbNo)
+    
+    If Not noCompare Then
+        ' Ouvrir explorateur pour sélectionner le fichier CCI précédent
+        FileNamePrev = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le fichier CCI à comparer")
+        If FileNamePrev = "False" Then
+            MsgBox "Aucun fichier précédent sélectionné. Mouvements resteront vides."
+            noCompare = True
+        Else
+            If FileNamePrev = ActiveWorkbook.FullName Then
+                MsgBox "Fichier identique au courant. Pas de mouvement possible."
+                noCompare = True
+            Else
+                On Error GoTo ErrorFile
+                Set wbPrecedent = workbooks.Open(FileNamePrev)
+                
+                ' Vérifier si ResumeCCI existe déjà
+                On Error Resume Next
+                Set wsPrevResume = wbPrecedent.Sheets("ResumeCCI")
+                On Error GoTo ErrorFile
+                If wsPrevResume Is Nothing Then
+                    ' Générer si non existant
+                    Call GenerateResumeCCI(wbPrecedent)
+                    Set wsPrevResume = wbPrecedent.Sheets("ResumeCCI")
+                End If
+                
+                ' Dernière ligne précédente
+                lastRowPrev = wsPrevResume.Cells(wsPrevResume.Rows.Count, "E").End(xlUp).Row
+                
+                ' Créer dictPrecedent directement depuis la colonne E (dirigeant) -> count soc, total GF
+                Set dictPrecedent = CreateObject("Scripting.Dictionary")
+                For i = 2 To lastRowPrev
+                    dirigeant = Trim(wsPrevResume.Cells(i, "E").Value)
+                    montantGF = val(wsPrevResume.Cells(i, "G").Value)
+                    
+                    If dirigeant <> "" Then
+                        If Not dictPrecedent.Exists(dirigeant) Then
+                            dictPrecedent.Add dirigeant, Array(1, montantGF)
+                        Else
+                            prevArr = dictPrecedent(dirigeant)
+                            prevArr(0) = prevArr(0) + 1
+                            prevArr(1) = prevArr(1) + montantGF
+                            dictPrecedent(dirigeant) = prevArr
+                        End If
+                    End If
+                Next i
+                
+                wbPrecedent.Close SaveChanges:=False
+            End If
+        End If
+    Else
+        Set dictPrecedent = CreateObject("Scripting.Dictionary")
+    End If
+    
+    ' Traitement actuel comme avant
+    Set dictDirigeants = CreateObject("Scripting.Dictionary")
+    lastRow = wsSource.Cells(wsSource.Rows.Count, "E").End(xlUp).Row
+    
+    For i = 2 To lastRow
+        dirigeant = Trim(wsSource.Cells(i, "E").Value)
+        garant = Trim(wsSource.Cells(i, "F").Value)
+        montantGF = val(wsSource.Cells(i, "G").Value)
+        
+        If dirigeant <> "" Then
+            If Not dictDirigeants.Exists(dirigeant) Then
+                Set dictGarants = CreateObject("Scripting.Dictionary")
+                dictDirigeants.Add dirigeant, Array(1, dictGarants, montantGF)
+            Else
+                arr = dictDirigeants(dirigeant)
+                arr(0) = arr(0) + 1
+                arr(2) = arr(2) + montantGF
+                Set dictGarants = arr(1)
+                dictDirigeants(dirigeant) = Array(arr(0), dictGarants, arr(2))
+            End If
+            
+            If garant <> "" Then
+                If dictGarants.Exists(garant) Then
+                    dictGarants(garant) = dictGarants(garant) + 1
+                Else
+                    dictGarants.Add garant, 1
+                End If
+            End If
+        End If
+    Next i
+    
+    ' Créer nouvelle feuille
+    Set wsDest = ActiveWorkbook.Sheets.Add(After:=wsSource)
+    wsDest.Name = "ResumeDirigeants"
+    
+    ' Écrire en-têtes
+    With wsDest
+        .Cells(1, 1).Value = "Dirigeant"
+        .Cells(1, 2).Value = "Total sociétés"
+        .Cells(1, 3).Value = "Garant principal"
+        .Cells(1, 4).Value = "Mouvement société"
+        .Cells(1, 5).Value = "Montant total GF"
+        .Cells(1, 6).Value = "Mouvement GF"
+        
+        .Range("A1:F1").Font.Bold = True
+        .Range("A1:F1").Interior.Color = RGB(200, 200, 200)
+        .Range("A1:F1").HorizontalAlignment = xlCenter
+    End With
+    
+    ' Écrire données
+    rowDest = 2
+    For Each key In dictDirigeants.Keys
+        arr = dictDirigeants(key)
+        Set dictGarants = arr(1)
+        
+        maxGarant = ""
+        maxCount = 0
+        For Each subKey In dictGarants.Keys
+            If dictGarants(subKey) > maxCount Then
+                maxCount = dictGarants(subKey)
+                maxGarant = subKey
+            End If
+        Next subKey
+        
+        ' Calcul mouvements
+        If noCompare Then
+            diffSoc = 0
+            diffGF = 0
+        Else
+            diffSoc = arr(0)
+            diffGF = arr(2)
+            If dictPrecedent.Exists(key) Then
+                prevArr = dictPrecedent(key)
+                diffSoc = arr(0) - prevArr(0)
+                diffGF = arr(2) - prevArr(1)
+            End If
+        End If
+        
+        With wsDest
+            .Cells(rowDest, 1).Value = key
+            .Cells(rowDest, 2).Value = arr(0)
+            .Cells(rowDest, 3).Value = maxGarant
+            If diffSoc = 0 Then
+                .Cells(rowDest, 4).Value = "NA"
+            Else
+                .Cells(rowDest, 4).Value = diffSoc
+                If diffSoc > 0 Then .Cells(rowDest, 4).Interior.Color = RGB(0, 255, 0) ' Vert
+                If diffSoc < 0 Then .Cells(rowDest, 4).Interior.Color = RGB(255, 0, 0) ' Rouge
+            End If
+            .Cells(rowDest, 5).Value = arr(2)
+            If diffGF = 0 Then
+                .Cells(rowDest, 6).Value = "NA"
+            Else
+                .Cells(rowDest, 6).Value = diffGF
+                .Cells(rowDest, 6).NumberFormat = "#,##0, ""K€"""
+                If diffGF > 0 Then .Cells(rowDest, 6).Interior.Color = RGB(0, 255, 0)
+                If diffGF < 0 Then .Cells(rowDest, 6).Interior.Color = RGB(255, 0, 0)
+            End If
+            rowDest = rowDest + 1
+        End With
+    Next key
+    
+    ' Ajouter dirigeants perdus si comparaison
+    If Not noCompare Then
+        For Each key In dictPrecedent.Keys
+            If Not dictDirigeants.Exists(key) Then
+                prevArr = dictPrecedent(key)
+                diffSoc = -prevArr(0)
+                diffGF = -prevArr(1)
+                
+                With wsDest
+                    .Cells(rowDest, 1).Value = key
+                    .Cells(rowDest, 2).Value = 0
+                    .Cells(rowDest, 3).Value = ""
+                    If diffSoc = 0 Then
+                        .Cells(rowDest, 4).Value = "NA"
+                    Else
+                        .Cells(rowDest, 4).Value = diffSoc
+                        If diffSoc > 0 Then .Cells(rowDest, 4).Interior.Color = RGB(0, 255, 0)
+                        If diffSoc < 0 Then .Cells(rowDest, 4).Interior.Color = RGB(255, 0, 0)
+                    End If
+                    .Cells(rowDest, 5).Value = 0
+                    If diffGF = 0 Then
+                        .Cells(rowDest, 6).Value = "NA"
+                    Else
+                        .Cells(rowDest, 6).Value = diffGF
+                        .Cells(rowDest, 6).NumberFormat = "#,##0, ""K€"""
+                        If diffGF > 0 Then .Cells(rowDest, 6).Interior.Color = RGB(0, 255, 0)
+                        If diffGF < 0 Then .Cells(rowDest, 6).Interior.Color = RGB(255, 0, 0)
+                    End If
+                    rowDest = rowDest + 1
+                End With
+            End If
+        Next key
+    End If
+    
+    ' Créer tableau
+    Set tblRange = wsDest.Range("A1:F" & rowDest - 1)
+    Set tbl = wsDest.ListObjects.Add(xlSrcRange, tblRange, , xlYes)
+    tbl.Name = "TblDirigeants"
+    
+    ' Mise en forme supplémentaire
+    With wsDest
+        .Columns("A:F").AutoFit
+        .Range("E2:E" & rowDest - 1).NumberFormat = "#,##0, ""K€"""
+    End With
+    
+    MsgBox "Tableau des dirigeants créé dans la feuille 'ResumeDirigeants'."
+    
+Exit Sub
+
+ErrorFile:
+    MsgBox "Fichier précédent invalide (feuille 'ResumeCCI' manquante). Mouvements resteront vides."
+    If Not wbPrecedent Is Nothing Then wbPrecedent.Close SaveChanges:=False
+    noCompare = True
+    Resume Next
+
+End Sub
+
+Sub GenerateResumeCCI(wb As Workbook)
+
+    Dim wsEnt As Worksheet, wsDir As Worksheet, wsGar As Worksheet, wsAss As Worksheet, wsResume As Worksheet
+    Dim dictEnt As Object, dictDir As Object, dictGar As Object, dictMont As Object, dictAss As Object
+    Dim dictHom As Object
+    Dim lastRowEnt As Long, lastRowDir As Long, lastRowGar As Long, lastRowAss As Long
+    Dim i As Long, j As Long
+    Dim key As Variant, valeur As Variant, montant As Variant
+
+    ' Feuilles source
+    Set wsEnt = wb.Sheets("Entreprise")
+    Set wsDir = wb.Sheets("Dirigeant")
+    Set wsGar = wb.Sheets("Garant")
+    Set wsAss = wb.Sheets("Assureur")
+
+    ' Dernières lignes
+    lastRowEnt = wsEnt.Cells(wsEnt.Rows.Count, 1).End(xlUp).Row
+    lastRowDir = wsDir.Cells(wsDir.Rows.Count, 1).End(xlUp).Row
+    lastRowGar = wsGar.Cells(wsGar.Rows.Count, 1).End(xlUp).Row
+    lastRowAss = wsAss.Cells(wsAss.Rows.Count, 1).End(xlUp).Row
+
+    ' Créer les dictionnaires
+    Set dictEnt = CreateObject("Scripting.Dictionary")
+    Set dictDir = CreateObject("Scripting.Dictionary")
+    Set dictGar = CreateObject("Scripting.Dictionary")
+    Set dictMont = CreateObject("Scripting.Dictionary")
+    Set dictAss = CreateObject("Scripting.Dictionary")
+    Set dictHom = CreateObject("Scripting.Dictionary")
+
+    ' Remplacements pour homonymes (même liste)
+    With dictHom
+        .Add "GAL", "GALIAN-SMABTP"
+        .Add "GAILIAN", "GALIAN-SMABTP"
+        .Add "MMA", "MMA"
+        .Add "ALLIANZ", "ALLIANZ"
+        .Add "AXA", "AXA"
+        .Add "SO C", "SOCAF"
+        .Add "SO.", "SOCAF"
+        .Add "SOCA", "SOCAF"
+        .Add "SOCIETE DE CAUTION", "SOCAF"
+        .Add "SOCIÉTÉ DE CAUTION", "SOCAF"
+        .Add "QBE", "QBE"
+        .Add "GROUPAMA", "GROUPAMA"
+        .Add "GENERALI", "GENERALI"
+        .Add "CEGC", "CEGC"
+        .Add "COMPAGNIE EUR", "CEGC"
+        .Add "COMPANIE EUR", "CEGC"
+        .Add "LLOYD", "LLOYDS"
+        .Add "GROUPEMENT FRANCAIS", "GFC"
+        .Add "GFC", "GFC"
+        .Add "SMA", "GALIAN-SMABTP"
+        .Add "CIC", "CIC"
+        .Add "CREDIT IND", "CIC"
+        .Add "CAISSE FEDERALE", "CREDIT MUTUEL"
+        .Add " LACAISSE FEDERALE", "CREDIT MUTUEL"
+        .Add "CAISSE R", "CREDIT AGRICOLE"
+        .Add "(CAMCA", "CREDIT AGRICOLE"
+        .Add "CREDIT AGRICOLE", "CREDIT AGRICOLE"
+        .Add "CAISSE D'ASSURANCES MUTUELLES DU CREDIT AGRICOLE", "CREDIT AGRICOLE"
+        .Add "CAISSE D'EPARGNE", "CAISSE D'EPARGNE"
+    End With
+
+    ' Map entreprises (Société = Dénomination en colonne 10, SIREN en 9)
+    For i = 2 To lastRowEnt
+        key = wsEnt.Cells(i, 1).Value
+        If Not dictEnt.Exists(key) Then
+            dictEnt.Add key, Array(wsEnt.Cells(i, 10).Value, wsEnt.Cells(i, 8).Value)  ' Société, SIREN
+        End If
+    Next i
+
+    ' Map dirigeants
+    For i = 2 To lastRowDir
+        key = wsDir.Cells(i, 2).Value
+        If Not dictDir.Exists(key) Then
+            valeur = wsDir.Cells(i, 3).Value & " " & LCase(wsDir.Cells(i, 5).Value)
+            dictDir.Add key, valeur
+        End If
+    Next i
+
+    ' Map garants et montants
+    For i = 2 To lastRowGar
+        key = wsGar.Cells(i, 2).Value ' Identifiant
+        Dim nomGarant As String
+        nomGarant = UCase(wsGar.Cells(i, 3).Value) ' Nom du garant à normaliser
+    
+        ' Appliquer remplacement par recherche de mot-clé partiel
+        For Each cleHom In dictHom.Keys
+            If InStr(1, nomGarant, cleHom, vbTextCompare) > 0 Then
+                nomGarant = dictHom(cleHom)
+                Exit For
+            End If
+        Next cleHom
+    
+        ' Stocke unique (premier trouvé après remplacement)
+        If Not dictGar.Exists(key) Then
+            dictGar.Add key, nomGarant
+        End If
+    
+        ' Initialiser le montant si nécessaire
+        If Not dictMont.Exists(key) Then dictMont.Add key, 0
+    
+        ' Traitement du montant
+        montant = wsGar.Cells(i, 5).Value
+        If IsNumeric(montant) Then
+            dictMont(key) = dictMont(key) + CDbl(montant)
+        End If
+    Next i
+
+    ' Map assureurs (ne garder que le premier)
+    For i = 2 To lastRowAss
+        key = wsAss.Cells(i, 2).Value
+        valeur = wsAss.Cells(i, 3).Value
+        If Not dictAss.Exists(key) Then
+            dictAss.Add key, valeur
+        End If
+        ' Sinon on ignore les suivants
+    Next i
+
+    ' Créer feuille ResumeCCI dans wb (temporaire)
+    Set wsResume = wb.Sheets.Add(After:=wb.Sheets(wb.Sheets.Count))
+    wsResume.Name = "ResumeCCI"
+    wsResume.Cells(1, 1).Resize(1, 8).Value = Array("ID", "N° sociétaire", "Société", "SIREN", "Dirigeant", "Garant", "Montant GF", "Assureur")
+
+    ' Remplir les données (sans N° sociétaire, car pas de portefeuille)
+    j = 2
+    For Each key In dictEnt.Keys
+        wsResume.Cells(j, 1).Value = key
+        wsResume.Cells(j, 4).Value = dictEnt(key)(1)  ' SIREN
+        wsResume.Cells(j, 2).Value = "NA"  ' Pas de portefeuille
+        wsResume.Cells(j, 3).Value = dictEnt(key)(0)  ' Société
+        If dictDir.Exists(key) Then wsResume.Cells(j, 5).Value = dictDir(key)
+        If dictGar.Exists(key) Then wsResume.Cells(j, 6).Value = dictGar(key)
+        If dictMont.Exists(key) Then wsResume.Cells(j, 7).Value = dictMont(key)
+        If dictAss.Exists(key) Then wsResume.Cells(j, 8).Value = dictAss(key)
+        j = j + 1
+    Next
+
+End Sub
