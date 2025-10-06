@@ -246,32 +246,31 @@ Sub ResumerCCI()
     ' Construire la feuille ComparatifDirigeants
     ' ==============================
 
-    ' Agrégats actuels par dirigeant (comptes, montants, garant principal) en considérant TOUS les dirigeants par société
+    ' Agrégats actuels par dirigeant (comptes, montants, garant principal) en prenant uniquement le dirigeant principal
     Set dictDirSocCount = CreateObject("Scripting.Dictionary")
     Set dictDirTotalGF = CreateObject("Scripting.Dictionary")
     Set dictDirGarantFreq = CreateObject("Scripting.Dictionary") ' canonDir -> (Garant -> Count)
 
     For Each key In dictEnt.Keys
-        If dictAllDirByID.Exists(key) Then
-            For Each dirCanon In dictAllDirByID(key).Keys
-                dirDisplay = dictAllDirByID(key)(dirCanon)
-                If Not dirKeyToDisplay.Exists(dirCanon) Then dirKeyToDisplay.Add dirCanon, dirDisplay
+        If dictDirPrimaryKeyMap.Exists(key) Then
+            dirCanon = CStr(dictDirPrimaryKeyMap(key))
+            dirDisplay = CStr(dictDirPrimary(key))
+            If Not dirKeyToDisplay.Exists(dirCanon) Then dirKeyToDisplay.Add dirCanon, dirDisplay
 
-                If Not dictDirSocCount.Exists(dirCanon) Then dictDirSocCount.Add dirCanon, 0
-                dictDirSocCount(dirCanon) = dictDirSocCount(dirCanon) + 1
+            If Not dictDirSocCount.Exists(dirCanon) Then dictDirSocCount.Add dirCanon, 0
+            dictDirSocCount(dirCanon) = dictDirSocCount(dirCanon) + 1
 
-                If Not dictDirTotalGF.Exists(dirCanon) Then dictDirTotalGF.Add dirCanon, 0#
-                If dictMont.Exists(key) Then
-                    If IsNumeric(dictMont(key)) Then dictDirTotalGF(dirCanon) = CDbl(dictDirTotalGF(dirCanon)) + CDbl(dictMont(key))
-                End If
+            If Not dictDirTotalGF.Exists(dirCanon) Then dictDirTotalGF.Add dirCanon, 0#
+            If dictMont.Exists(key) Then
+                If IsNumeric(dictMont(key)) Then dictDirTotalGF(dirCanon) = CDbl(dictDirTotalGF(dirCanon)) + CDbl(dictMont(key))
+            End If
 
-                If Not dictDirGarantFreq.Exists(dirCanon) Then Set dictDirGarantFreq(dirCanon) = CreateObject("Scripting.Dictionary")
-                If dictGar.Exists(key) Then
-                    garantName = CStr(dictGar(key))
-                    If Not dictDirGarantFreq(dirCanon).Exists(garantName) Then dictDirGarantFreq(dirCanon).Add garantName, 0
-                    dictDirGarantFreq(dirCanon)(garantName) = dictDirGarantFreq(dirCanon)(garantName) + 1
-                End If
-            Next dirCanon
+            If Not dictDirGarantFreq.Exists(dirCanon) Then Set dictDirGarantFreq(dirCanon) = CreateObject("Scripting.Dictionary")
+            If dictGar.Exists(key) Then
+                garantName = CStr(dictGar(key))
+                If Not dictDirGarantFreq(dirCanon).Exists(garantName) Then dictDirGarantFreq(dirCanon).Add garantName, 0
+                dictDirGarantFreq(dirCanon)(garantName) = dictDirGarantFreq(dirCanon)(garantName) + 1
+            End If
         End If
     Next key
 
@@ -345,22 +344,38 @@ Sub ResumerCCI()
 
             ' (Assureurs anciens non nécessaires pour ce comparatif)
 
-            ' Agrégats anciens par dirigeant (tous dirigeants par société)
+            ' Sélection du dirigeant principal ancien par ID (même règle déterministe)
+            Set dictOldDirPrimary = CreateObject("Scripting.Dictionary")
+            Set dictOldDirPrimaryKeyMap = CreateObject("Scripting.Dictionary")
+            Dim idKey As Variant, minCanon As String, disp As String
+            For Each idKey In dictOldAllDirByID.Keys
+                minCanon = ""
+                For Each canonKey In dictOldAllDirByID(idKey).Keys
+                    If minCanon = "" Or canonKey < minCanon Then
+                        minCanon = canonKey
+                    End If
+                Next canonKey
+                If Len(minCanon) > 0 Then
+                    disp = dictOldAllDirByID(idKey)(minCanon)
+                    dictOldDirPrimary.Add idKey, disp
+                    dictOldDirPrimaryKeyMap.Add idKey, minCanon
+                    If Not dirKeyToDisplay.Exists(minCanon) Then dirKeyToDisplay.Add minCanon, disp
+                End If
+            Next idKey
+
+            ' Agrégats anciens par dirigeant (uniquement dirigeant principal)
             Set dictOldDirSocCount = CreateObject("Scripting.Dictionary")
             Set dictOldDirTotalGF = CreateObject("Scripting.Dictionary")
 
             For Each key In dictEntOld.Keys
-                If Not dictOldAllDirByID Is Nothing Then
-                    If dictOldAllDirByID.Exists(key) Then
-                        For Each dirCanon In dictOldAllDirByID(key).Keys
-                            If Not dictOldDirSocCount.Exists(dirCanon) Then dictOldDirSocCount.Add dirCanon, 0
-                            dictOldDirSocCount(dirCanon) = dictOldDirSocCount(dirCanon) + 1
+                If dictOldDirPrimaryKeyMap.Exists(key) Then
+                    dirCanon = CStr(dictOldDirPrimaryKeyMap(key))
+                    If Not dictOldDirSocCount.Exists(dirCanon) Then dictOldDirSocCount.Add dirCanon, 0
+                    dictOldDirSocCount(dirCanon) = dictOldDirSocCount(dirCanon) + 1
 
-                            If Not dictOldDirTotalGF.Exists(dirCanon) Then dictOldDirTotalGF.Add dirCanon, 0#
-                            If dictMontOld.Exists(key) Then
-                                If IsNumeric(dictMontOld(key)) Then dictOldDirTotalGF(dirCanon) = CDbl(dictOldDirTotalGF(dirCanon)) + CDbl(dictMontOld(key))
-                            End If
-                        Next dirCanon
+                    If Not dictOldDirTotalGF.Exists(dirCanon) Then dictOldDirTotalGF.Add dirCanon, 0#
+                    If dictMontOld.Exists(key) Then
+                        If IsNumeric(dictMontOld(key)) Then dictOldDirTotalGF(dirCanon) = CDbl(dictOldDirTotalGF(dirCanon)) + CDbl(dictMontOld(key))
                     End If
                 End If
             Next key
