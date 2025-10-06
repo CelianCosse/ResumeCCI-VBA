@@ -1,70 +1,3 @@
-Option Explicit
-
-Private Function NormalizeText(ByVal inputText As String) As String
-    Dim s As String
-    s = CStr(inputText)
-    s = Trim$(s)
-    s = UCase$(s)
-    Do While InStr(1, s, "  ") > 0
-        s = Replace$(s, "  ", " ")
-    Loop
-    s = Replace$(s, "À", "A")
-    s = Replace$(s, "Â", "A")
-    s = Replace$(s, "Ä", "A")
-    s = Replace$(s, "Æ", "AE")
-    s = Replace$(s, "Ç", "C")
-    s = Replace$(s, "É", "E")
-    s = Replace$(s, "È", "E")
-    s = Replace$(s, "Ê", "E")
-    s = Replace$(s, "Ë", "E")
-    s = Replace$(s, "Ï", "I")
-    s = Replace$(s, "Î", "I")
-    s = Replace$(s, "Ö", "O")
-    s = Replace$(s, "Ô", "O")
-    s = Replace$(s, "Œ", "OE")
-    s = Replace$(s, "Ù", "U")
-    s = Replace$(s, "Û", "U")
-    s = Replace$(s, "Ü", "U")
-    NormalizeText = s
-End Function
-
-Private Function NormalizeDirigeantName(ByVal lastName As String, ByVal firstName As String) As String
-    NormalizeDirigeantName = NormalizeText(lastName) & " " & NormalizeText(firstName)
-End Function
-
-Private Function NormalizeGarantName(ByVal rawGarant As String, ByVal dictHom As Object) As String
-    Dim garant As String
-    Dim homKey As Variant
-    garant = NormalizeText(rawGarant)
-    For Each homKey In dictHom.Keys
-        If InStr(1, garant, CStr(homKey), vbTextCompare) > 0 Then
-            garant = CStr(dictHom(homKey))
-            Exit For
-        End If
-    Next homKey
-    NormalizeGarantName = garant
-End Function
-
-Private Function ToNumber(ByVal v As Variant) As Double
-    If IsNumeric(v) Then
-        ToNumber = CDbl(v)
-    Else
-        Dim s As String
-        s = CStr(v)
-        s = Replace$(s, "€", "")
-        s = Replace$(s, "K€", "")
-        s = Replace$(s, "k€", "")
-        s = Replace$(s, Chr$(160), "") ' non-breaking space
-        s = Replace$(s, " ", "")
-        s = Replace$(s, ",", ".")
-        If IsNumeric(s) Then
-            ToNumber = CDbl(s)
-        Else
-            ToNumber = 0#
-        End If
-    End If
-End Function
-
 Sub ResumerCCI()
 
     Dim FileNameCCI As String, FileNamePortefeuille As String
@@ -72,7 +5,6 @@ Sub ResumerCCI()
     Dim wsEnt As Worksheet, wsDir As Worksheet, wsGar As Worksheet, wsAss As Worksheet, wsBaseCA As Worksheet, wsTarget As Worksheet
     Dim dictEnt As Object, dictDir As Object, dictGar As Object, dictMont As Object, dictAss As Object, dictSoc As Object
     Dim dictHom As Object
-    Dim cleHom As Variant
     Dim lastRowEnt As Long, lastRowDir As Long, lastRowGar As Long, lastRowAss As Long, lastRowBaseCA As Long
     Dim i As Long, j As Long
     Dim key As Variant, valeur As Variant, montant As Variant
@@ -148,7 +80,7 @@ Sub ResumerCCI()
     For i = 2 To lastRowDir
         key = wsDir.Cells(i, 2).Value
         If Not dictDir.Exists(key) Then
-            valeur = NormalizeDirigeantName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value)
+            valeur = wsDir.Cells(i, 3).Value & " " & LCase(wsDir.Cells(i, 5).Value)
             dictDir.Add key, valeur
         End If
     Next i
@@ -157,7 +89,15 @@ Sub ResumerCCI()
     For i = 2 To lastRowGar
         key = wsGar.Cells(i, 2).Value ' Identifiant
         Dim nomGarant As String
-        nomGarant = NormalizeGarantName(wsGar.Cells(i, 3).Value, dictHom)
+        nomGarant = UCase(wsGar.Cells(i, 3).Value) ' Nom du garant à normaliser
+    
+        ' Appliquer remplacement par recherche de mot-clé partiel
+        For Each cleHom In dictHom.Keys
+            If InStr(1, nomGarant, cleHom, vbTextCompare) > 0 Then
+                nomGarant = dictHom(cleHom)
+                Exit For
+            End If
+        Next cleHom
     
         ' Stocke unique (premier trouvé après remplacement)
         If Not dictGar.Exists(key) Then
@@ -284,7 +224,6 @@ Sub ResumeDirigeants()
     Dim prevArr As Variant, diffSoc As Long, diffGF As Double
     Dim response As VbMsgBoxResult
     Dim noCompare As Boolean
-    Dim arr As Variant
     
     ' Définir les feuilles actuelles
     Set wsSource = ActiveWorkbook.Sheets("ResumeCCI")
@@ -307,46 +246,26 @@ Sub ResumeDirigeants()
                 On Error GoTo ErrorFile
                 Set wbPrecedent = workbooks.Open(FileNamePrev)
                 
-                ' Reconstruire un résumé normalisé en mémoire pour le précédent
-                Dim wsPrevEnt As Worksheet, wsPrevDir As Worksheet, wsPrevGar As Worksheet
-                Dim lastRowPrevEnt As Long, lastRowPrevDir As Long, lastRowPrevGar As Long
-                Dim dictPrevDir As Object, dictPrevMont As Object
-                Dim k As Variant
+                ' Vérifier si ResumeCCI existe déjà
+                On Error Resume Next
+                Set wsPrevResume = wbPrecedent.Sheets("ResumeCCI")
+                On Error GoTo ErrorFile
+                If wsPrevResume Is Nothing Then
+                    ' Générer si non existant
+                    Call GenerateResumeCCI(wbPrecedent)
+                    Set wsPrevResume = wbPrecedent.Sheets("ResumeCCI")
+                End If
                 
-                Set wsPrevEnt = wbPrecedent.Sheets("Entreprise")
-                Set wsPrevDir = wbPrecedent.Sheets("Dirigeant")
-                Set wsPrevGar = wbPrecedent.Sheets("Garant")
+                ' Dernière ligne précédente
+                lastRowPrev = wsPrevResume.Cells(wsPrevResume.Rows.Count, "E").End(xlUp).Row
                 
-                lastRowPrevEnt = wsPrevEnt.Cells(wsPrevEnt.Rows.Count, 1).End(xlUp).Row
-                lastRowPrevDir = wsPrevDir.Cells(wsPrevDir.Rows.Count, 1).End(xlUp).Row
-                lastRowPrevGar = wsPrevGar.Cells(wsPrevGar.Rows.Count, 1).End(xlUp).Row
-                
-                Set dictPrevDir = CreateObject("Scripting.Dictionary")
-                Set dictPrevMont = CreateObject("Scripting.Dictionary")
-                
-                ' Map dirigeants (id -> nom normalisé)
-                For i = 2 To lastRowPrevDir
-                    k = wsPrevDir.Cells(i, 2).Value
-                    If Not dictPrevDir.Exists(k) Then
-                        dictPrevDir.Add k, NormalizeDirigeantName(wsPrevDir.Cells(i, 3).Value, wsPrevDir.Cells(i, 5).Value)
-                    End If
-                Next i
-                
-                ' Somme montants GF par id
-                For i = 2 To lastRowPrevGar
-                    k = wsPrevGar.Cells(i, 2).Value
-                    If Not dictPrevMont.Exists(k) Then dictPrevMont.Add k, 0#
-                    dictPrevMont(k) = dictPrevMont(k) + ToNumber(wsPrevGar.Cells(i, 5).Value)
-                Next i
-                
-                ' Agréger par dirigeant
+                ' Créer dictPrecedent directement depuis la colonne E (dirigeant) -> count soc, total GF
                 Set dictPrecedent = CreateObject("Scripting.Dictionary")
-                For i = 2 To lastRowPrevEnt
-                    k = wsPrevEnt.Cells(i, 1).Value
-                    If dictPrevDir.Exists(k) Then
-                        dirigeant = dictPrevDir(k)
-                        montantGF = 0#
-                        If dictPrevMont.Exists(k) Then montantGF = dictPrevMont(k)
+                For i = 2 To lastRowPrev
+                    dirigeant = Trim(wsPrevResume.Cells(i, "E").Value)
+                    montantGF = val(wsPrevResume.Cells(i, "G").Value)
+                    
+                    If dirigeant <> "" Then
                         If Not dictPrecedent.Exists(dirigeant) Then
                             dictPrecedent.Add dirigeant, Array(1, montantGF)
                         Else
@@ -370,9 +289,9 @@ Sub ResumeDirigeants()
     lastRow = wsSource.Cells(wsSource.Rows.Count, "E").End(xlUp).Row
     
     For i = 2 To lastRow
-        dirigeant = NormalizeText(wsSource.Cells(i, "E").Value)
+        dirigeant = Trim(wsSource.Cells(i, "E").Value)
         garant = Trim(wsSource.Cells(i, "F").Value)
-        montantGF = ToNumber(wsSource.Cells(i, "G").Value)
+        montantGF = val(wsSource.Cells(i, "G").Value)
         
         If dirigeant <> "" Then
             If Not dictDirigeants.Exists(dirigeant) Then
@@ -594,29 +513,37 @@ Sub GenerateResumeCCI(wb As Workbook)
         End If
     Next i
 
-    ' Map dirigeants (normalisés)
+    ' Map dirigeants
     For i = 2 To lastRowDir
         key = wsDir.Cells(i, 2).Value
         If Not dictDir.Exists(key) Then
-            valeur = NormalizeDirigeantName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value)
+            valeur = wsDir.Cells(i, 3).Value & " " & LCase(wsDir.Cells(i, 5).Value)
             dictDir.Add key, valeur
         End If
     Next i
 
-    ' Map garants et montants (normalisés)
+    ' Map garants et montants
     For i = 2 To lastRowGar
         key = wsGar.Cells(i, 2).Value ' Identifiant
         Dim nomGarant As String
-        nomGarant = NormalizeGarantName(wsGar.Cells(i, 3).Value, dictHom)
-
+        nomGarant = UCase(wsGar.Cells(i, 3).Value) ' Nom du garant à normaliser
+    
+        ' Appliquer remplacement par recherche de mot-clé partiel
+        For Each cleHom In dictHom.Keys
+            If InStr(1, nomGarant, cleHom, vbTextCompare) > 0 Then
+                nomGarant = dictHom(cleHom)
+                Exit For
+            End If
+        Next cleHom
+    
         ' Stocke unique (premier trouvé après remplacement)
         If Not dictGar.Exists(key) Then
             dictGar.Add key, nomGarant
         End If
-
+    
         ' Initialiser le montant si nécessaire
         If Not dictMont.Exists(key) Then dictMont.Add key, 0
-
+    
         ' Traitement du montant
         montant = wsGar.Cells(i, 5).Value
         If IsNumeric(montant) Then
