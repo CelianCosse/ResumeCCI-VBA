@@ -273,79 +273,13 @@ Sub ResumerCCI()
     ' Tableau croisé dynamique Dirigeant x Garant
     ' ==============================
     Dim wsPivot As Worksheet
-    Dim wsPivotSrc As Worksheet
     Dim pc As PivotCache
     Dim pt As PivotTable
     Dim srcRange As Range
     Dim destCell As Range
-    Dim canonToGarantSet As Object
-    Dim allowedDir As Object
-    Dim srcData As Variant, outData As Variant
-    Dim outIdx As Long, iRow As Long, col As Long
 
-    ' Calculer en mémoire les dirigeants avec plusieurs garants
-    Set canonToGarantSet = CreateObject("Scripting.Dictionary")
-    For Each key In dictEnt.Keys
-        If dictDirPrimaryKeyMap.Exists(key) Then
-            dirCanon = CStr(dictDirPrimaryKeyMap(key))
-            If Not canonToGarantSet.Exists(dirCanon) Then Set canonToGarantSet(dirCanon) = CreateObject("Scripting.Dictionary")
-            If dictGar.Exists(key) Then
-                garantName = CStr(dictGar(key))
-                If Not canonToGarantSet(dirCanon).Exists(garantName) Then canonToGarantSet(dirCanon).Add garantName, True
-            End If
-        End If
-    Next key
-
-    Set allowedDir = CreateObject("Scripting.Dictionary")
-    For Each canonKey In canonToGarantSet.Keys
-        If canonToGarantSet(canonKey).Count > 1 Then
-            If dirKeyToDisplay.Exists(canonKey) Then
-                If Not allowedDir.Exists(CStr(dirKeyToDisplay(canonKey))) Then allowedDir.Add CStr(dirKeyToDisplay(canonKey)), True
-            Else
-                If Not allowedDir.Exists(CStr(canonKey)) Then allowedDir.Add CStr(canonKey), True
-            End If
-        End If
-    Next canonKey
-
-    ' Construire une source dédiée pour le TCD avec uniquement les dirigeants admissibles
-    On Error Resume Next
-    Set wsPivotSrc = wbTarget.Sheets("PivotSourceDirGar")
-    On Error GoTo 0
-    If wsPivotSrc Is Nothing Then
-        Set wsPivotSrc = wbTarget.Sheets.Add(After:=wsTarget)
-        wsPivotSrc.Name = "PivotSourceDirGar"
-    Else
-        wsPivotSrc.Cells.Clear
-    End If
-
-    ' En-têtes identiques à ResumeCCI
-    wsPivotSrc.Cells(1, 1).Resize(1, 8).Value = wsTarget.Cells(1, 1).Resize(1, 8).Value
-
-    outIdx = 0
-    If numRows > 0 Then
-        srcData = wsTarget.Range("A2").Resize(numRows, 8).Value
-        ReDim outData(1 To numRows, 1 To 8)
-        For iRow = 1 To numRows
-            If allowedDir.Exists(CStr(srcData(iRow, 5))) Then ' Dirigeant
-                outIdx = outIdx + 1
-                For col = 1 To 8
-                    outData(outIdx, col) = srcData(iRow, col)
-                Next col
-            End If
-        Next iRow
-        If outIdx > 0 Then
-            wsPivotSrc.Range("A2").Resize(outIdx, 8).Value = outData
-            Dim srcTbl As ListObject
-            Set srcTbl = wsPivotSrc.ListObjects.Add(xlSrcRange, wsPivotSrc.Range("A1").CurrentRegion, , xlYes)
-            srcTbl.Name = "TableauPivotSource"
-            Set srcRange = srcTbl.Range
-        Else
-            ' Fallback si aucun dirigeant admissible
-            Set srcRange = wsTarget.ListObjects("TableauResume").Range
-        End If
-    Else
-        Set srcRange = wsTarget.ListObjects("TableauResume").Range
-    End If
+    ' Source du TCD: utiliser directement la table du résumé
+    Set srcRange = wsTarget.ListObjects("TableauResume").Range
 
     On Error Resume Next
     Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
@@ -377,8 +311,8 @@ Sub ResumerCCI()
     With pt
         .ClearAllFilters
         On Error Resume Next
-        .PivotFields("Garant").Orientation = xlRowField
-        .PivotFields("Dirigeant").Orientation = xlColumnField
+        .PivotFields("Dirigeant").Orientation = xlRowField
+        .PivotFields("Garant").Orientation = xlColumnField
         On Error GoTo 0
         .AddDataField .PivotFields("ID"), "Nb sociétés", xlCount
         .RowGrand = False
@@ -682,41 +616,37 @@ Sub ResumerCCI()
         End If
     Next key
 
-    ' Si on a construit une source filtrée, plus besoin de boucler sur les PivotItems
-    ' (garde ce bloc pour fallback quand la source n'est pas filtrée)
-    If srcRange.Worksheet.Name = wsTarget.Name Then
-        On Error Resume Next
-        Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
-        If Not wsPivot Is Nothing Then
-            Set pt = wsPivot.PivotTables("TCD_DirGar")
-            If Not pt Is Nothing Then
-                Dim pf As PivotField
-                Dim pi As PivotItem
-                Dim allowedCount As Long
-                Set pf = pt.PivotFields("Dirigeant")
+    On Error Resume Next
+    Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
+    If Not wsPivot Is Nothing Then
+        Set pt = wsPivot.PivotTables("TCD_DirGar")
+        If Not pt Is Nothing Then
+            Dim pf As PivotField
+            Dim pi As PivotItem
+            Dim allowedCount As Long
+            Set pf = pt.PivotFields("Dirigeant")
 
-                ' Regrouper les changements de visibilité pour accélérer
-                pt.ManualUpdate = True
+            ' Regrouper les changements de visibilité pour accélérer
+            pt.ManualUpdate = True
 
-                allowedCount = 0
+            allowedCount = 0
+            For Each pi In pf.PivotItems
+                If allowedDir.Exists(CStr(pi.Name)) Then allowedCount = allowedCount + 1
+            Next pi
+            If allowedCount > 0 Then
                 For Each pi In pf.PivotItems
-                    If allowedDir.Exists(CStr(pi.Name)) Then allowedCount = allowedCount + 1
+                    pi.Visible = True
                 Next pi
-                If allowedCount > 0 Then
-                    For Each pi In pf.PivotItems
-                        pi.Visible = True
-                    Next pi
-                    For Each pi In pf.PivotItems
-                        If Not allowedDir.Exists(CStr(pi.Name)) Then pi.Visible = False
-                    Next pi
-                End If
-
-                pt.ManualUpdate = False
-                pt.RefreshTable
+                For Each pi In pf.PivotItems
+                    If Not allowedDir.Exists(CStr(pi.Name)) Then pi.Visible = False
+                Next pi
             End If
+
+            pt.ManualUpdate = False
+            pt.RefreshTable
         End If
-        On Error GoTo 0
     End If
+    On Error GoTo 0
 
     ' ==============================
     ' Feuille de trace pour audit (IDs, dirigeants et principaux)
