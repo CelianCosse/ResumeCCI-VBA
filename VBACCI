@@ -444,16 +444,23 @@ Sub ResumerCCI()
                 End If
             Next i
 
-            ' Map dirigeants anciens (tous par ID)
+            ' Map dirigeants anciens (tous par ID) – Dénomination prioritaire
             Set dictOldAllDirByID = CreateObject("Scripting.Dictionary")
             For i = 2 To lastRowDirOld
                 key = CanonicalId(wsDirOld.Cells(i, 2).Value)
-                dirDisplay = NormalizeDisplayName(wsDirOld.Cells(i, 3).Value, wsDirOld.Cells(i, 5).Value)
-                canonKey = CanonicalKeyFromDisplay(dirDisplay)
+                Dim oldDenom As String
+                Dim oldDisplay As String
+                oldDenom = Trim$(CStr(wsDirOld.Cells(i, 10).Value))
+                If Len(oldDenom) > 0 Then
+                    oldDisplay = oldDenom
+                Else
+                    oldDisplay = NormalizeDisplayName(wsDirOld.Cells(i, 3).Value, wsDirOld.Cells(i, 5).Value)
+                End If
+                canonKey = CanonicalKeyFromDisplay(oldDisplay)
                 If Len(canonKey) > 0 Then
                     If Not dictOldAllDirByID.Exists(key) Then Set dictOldAllDirByID(key) = CreateObject("Scripting.Dictionary")
-                    If Not dictOldAllDirByID(key).Exists(canonKey) Then dictOldAllDirByID(key).Add canonKey, dirDisplay
-                    If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, dirDisplay
+                    If Not dictOldAllDirByID(key).Exists(canonKey) Then dictOldAllDirByID(key).Add canonKey, oldDisplay
+                    If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, oldDisplay
                 End If
             Next i
 
