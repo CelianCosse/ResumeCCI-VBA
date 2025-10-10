@@ -480,7 +480,7 @@ Sub ResumerCCI()
     ' Créer la feuille de comparatif
     Set wsComp = wbTarget.Sheets.Add(After:=wsTarget)
     wsComp.Name = "ComparatifDirigeants"
-    wsComp.Cells(1, 1).Resize(1, 7).Value = Array("Dirigeant", "Total sociétés", "Garant principal", "Mouvement société", "Montant total GF", "Mouvement GF", "Plusieurs dirigeants")
+    wsComp.Cells(1, 1).Resize(1, 7).Value = Array("Dirigeant", "Total sociétés", "Garant principal", "Mouvement société", "Montant total GF", "Mouvement GF", "Plusieurs garants")
 
     ' Remplir les données ligne à ligne
     rowIndex = 2
