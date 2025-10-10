@@ -112,7 +112,13 @@ Sub ResumerCCI()
     Set dirKeyToDisplay = CreateObject("Scripting.Dictionary")
     For i = 2 To lastRowDir
         key = CanonicalId(wsDir.Cells(i, 2).Value)
-        dirDisplay = NormalizeDisplayName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value)
+        Dim denom As String
+        denom = Trim$(CStr(wsDir.Cells(i, 10).Value)) ' Colonne J = Dénomination
+        If Len(denom) > 0 Then
+            dirDisplay = denom
+        Else
+            dirDisplay = NormalizeDisplayName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value) ' C (Nom) + E (Prénom 1)
+        End If
         canonKey = CanonicalKeyFromDisplay(dirDisplay)
         If Len(canonKey) > 0 Then
             If Not dictDirPrimary.Exists(key) Then
@@ -242,6 +248,61 @@ Sub ResumerCCI()
     wsTarget.Columns("G:G").NumberFormat = "#,##0, ""K€"""
 
     wsTarget.Columns.AutoFit
+
+    ' ==============================
+    ' Tableau croisé dynamique Dirigeant x Garant
+    ' ==============================
+    Dim wsPivot As Worksheet
+    Dim pc As PivotCache
+    Dim pt As PivotTable
+    Dim srcRange As Range
+    Dim destCell As Range
+
+    Set srcRange = wsTarget.ListObjects("TableauResume").Range
+
+    On Error Resume Next
+    Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
+    On Error GoTo 0
+    If wsPivot Is Nothing Then
+        Set wsPivot = wbTarget.Sheets.Add(After:=wsTarget)
+        wsPivot.Name = "PivotDirigeantGarant"
+    Else
+        wsPivot.Cells.Clear
+    End If
+
+    Set destCell = wsPivot.Range("A3")
+
+    Set pc = wbTarget.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=srcRange)
+
+    On Error Resume Next
+    Set pt = wsPivot.PivotTables("TCD_DirGar")
+    On Error GoTo 0
+    If pt Is Nothing Then
+        Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
+    Else
+        pt.ChangePivotCache pc
+        pt.TableRange2.Clear
+        Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
+    End If
+
+    With pt
+        .ClearAllFilters
+        On Error Resume Next
+        .PivotFields("Garant").Orientation = xlRowField
+        .PivotFields("Dirigeant").Orientation = xlColumnField
+        On Error GoTo 0
+        .AddDataField .PivotFields("ID"), "Nb sociétés", xlCount
+        .RowGrand = True
+        .ColumnGrand = True
+        .ShowTableStyleRowStripes = True
+    End With
+
+    On Error Resume Next
+    pt.TableStyle2 = "PivotStyleLight16"
+    On Error GoTo 0
+
+    If Not pt.DataBodyRange Is Nothing Then pt.DataBodyRange.NumberFormat = "0"
+    wsPivot.Columns.AutoFit
 
     ' ==============================
     ' Construire la feuille ComparatifDirigeants
@@ -403,7 +464,7 @@ Sub ResumerCCI()
     ' Créer la feuille de comparatif
     Set wsComp = wbTarget.Sheets.Add(After:=wsTarget)
     wsComp.Name = "ComparatifDirigeants"
-    wsComp.Cells(1, 1).Resize(1, 6).Value = Array("Dirigeant", "Total sociétés", "Garant principal", "Mouvement société", "Montant total GF", "Mouvement GF")
+    wsComp.Cells(1, 1).Resize(1, 7).Value = Array("Dirigeant", "Total sociétés", "Garant principal", "Mouvement société", "Montant total GF", "Mouvement GF", "Plusieurs dirigeants")
 
     ' Remplir les données ligne à ligne
     rowIndex = 2
@@ -458,6 +519,15 @@ Sub ResumerCCI()
         wsComp.Cells(rowIndex, 4).Value = mouvementSoc
         wsComp.Cells(rowIndex, 5).Value = currGF
         wsComp.Cells(rowIndex, 6).Value = mouvementGF
+        If dictDirGarantFreq.Exists(dirName) Then
+            If dictDirGarantFreq(dirName).Count > 1 Then
+                wsComp.Cells(rowIndex, 7).Value = "Oui"
+            Else
+                wsComp.Cells(rowIndex, 7).Value = "Non"
+            End If
+        Else
+            wsComp.Cells(rowIndex, 7).Value = "Non"
+        End If
 
         rowIndex = rowIndex + 1
     Next key
@@ -507,6 +577,44 @@ Sub ResumerCCI()
     End If
 
     wsComp.Columns.AutoFit
+
+    ' ==============================
+    ' Filtrer le TCD pour ne garder que les dirigeants avec plusieurs garants
+    ' ==============================
+    Dim allowedDir As Object
+    Set allowedDir = CreateObject("Scripting.Dictionary")
+    For Each key In dictDirGarantFreq.Keys
+        If dictDirGarantFreq(key).Count > 1 Then
+            If dirKeyToDisplay.Exists(key) Then
+                If Not allowedDir.Exists(dirKeyToDisplay(key)) Then allowedDir.Add dirKeyToDisplay(key), True
+            End If
+        End If
+    Next key
+
+    On Error Resume Next
+    Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
+    If Not wsPivot Is Nothing Then
+        Set pt = wsPivot.PivotTables("TCD_DirGar")
+        If Not pt Is Nothing Then
+            Dim pf As PivotField
+            Dim pi As PivotItem
+            Dim allowedCount As Long
+            Set pf = pt.PivotFields("Dirigeant")
+            allowedCount = 0
+            For Each pi In pf.PivotItems
+                If allowedDir.Exists(CStr(pi.Name)) Then allowedCount = allowedCount + 1
+            Next pi
+            If allowedCount > 0 Then
+                For Each pi In pf.PivotItems
+                    pi.Visible = True
+                Next pi
+                For Each pi In pf.PivotItems
+                    If Not allowedDir.Exists(CStr(pi.Name)) Then pi.Visible = False
+                Next pi
+            End If
+        End If
+    End If
+    On Error GoTo 0
 
     ' ==============================
     ' Feuille de trace pour audit (IDs, dirigeants et principaux)
