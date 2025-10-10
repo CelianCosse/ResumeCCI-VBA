@@ -38,10 +38,22 @@ Sub ResumerCCI()
     Dim dictAllDirByID As Object, dictOldAllDirByID As Object
     Dim dirCanon As Variant
 
+    ' Optimisations de performance
+    Dim prevScreenUpdating As Boolean
+    Dim prevCalculation As XlCalculation
+    Dim prevEnableEvents As Boolean
+
 
     ' Étape 1 : Ouvrir explorateur pour sélectionner le fichier source CCI
+    ' Sauvegarder et désactiver les options coûteuses
+    prevScreenUpdating = Application.ScreenUpdating
+    prevCalculation = Application.Calculation
+    prevEnableEvents = Application.EnableEvents
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
     FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
-    If FileNameCCI = "False" Then Exit Sub
+    If FileNameCCI = "False" Then GoTo Cleanup
     Set wbSource = workbooks.Open(FileNameCCI)
 
     ' Feuilles source
@@ -272,6 +284,7 @@ Sub ResumerCCI()
 
     Set destCell = wsPivot.Range("A3")
 
+    ' Créer le cache sans rafraîchissements répétés
     Set pc = wbTarget.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=srcRange)
 
     On Error Resume Next
@@ -280,11 +293,12 @@ Sub ResumerCCI()
     If pt Is Nothing Then
         Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
     Else
-        pt.ChangePivotCache pc
         pt.TableRange2.Clear
         Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
     End If
 
+    ' Construire le TCD sans rafraîchir à chaque étape
+    pt.ManualUpdate = True
     With pt
         .ClearAllFilters
         On Error Resume Next
@@ -296,6 +310,8 @@ Sub ResumerCCI()
         .ColumnGrand = True
         .ShowTableStyleRowStripes = True
     End With
+    pt.ManualUpdate = False
+    pt.RefreshTable
 
     On Error Resume Next
     pt.TableStyle2 = "PivotStyleLight16"
@@ -678,6 +694,11 @@ Sub ResumerCCI()
     wbTarget.Activate  ' Active le nouveau classeur
     MsgBox "Résumé, comparatif et trace créés et ouverts dans un nouveau classeur."
     wbSource.Close SaveChanges:=False
+
+    ' Restaurer les options
+    Application.ScreenUpdating = prevScreenUpdating
+    Application.Calculation = prevCalculation
+    Application.EnableEvents = prevEnableEvents
 
 End Sub
 
