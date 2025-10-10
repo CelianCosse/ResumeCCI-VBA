@@ -738,7 +738,44 @@ Sub ResumerCCI()
     wsTrace.Columns.AutoFit
 
     wbTarget.Activate  ' Active le nouveau classeur
-    MsgBox "Résumé, comparatif et trace créés et ouverts dans un nouveau classeur."
+    ' Vérification de cohérence: somme GF par dirigeant dans comparatif vs résumé
+    Dim dictGFResume As Object, dictGFComp As Object
+    Set dictGFResume = CreateObject("Scripting.Dictionary")
+    Set dictGFComp = CreateObject("Scripting.Dictionary")
+    Dim lo As ListObject, r As Long, last As Long, keyDir As String
+    Set lo = wsTarget.ListObjects("TableauResume")
+    last = lo.Range.Rows.Count
+    For r = 2 To last
+        keyDir = CStr(lo.Range.Cells(r, 5).Value)
+        If Len(keyDir) > 0 Then
+            If Not dictGFResume.Exists(keyDir) Then dictGFResume.Add keyDir, 0#
+            If IsNumeric(lo.Range.Cells(r, 7).Value) Then dictGFResume(keyDir) = CDbl(dictGFResume(keyDir)) + CDbl(lo.Range.Cells(r, 7).Value)
+        End If
+    Next r
+
+    Dim compLast As Long
+    compLast = wsComp.Cells(wsComp.Rows.Count, 1).End(xlUp).Row
+    For r = 2 To compLast
+        keyDir = CStr(wsComp.Cells(r, 1).Value)
+        If Len(keyDir) > 0 Then
+            If Not dictGFComp.Exists(keyDir) Then dictGFComp.Add keyDir, 0#
+            If IsNumeric(wsComp.Cells(r, 5).Value) Then dictGFComp(keyDir) = CDbl(dictGFComp(keyDir)) + CDbl(wsComp.Cells(r, 5).Value)
+        End If
+    Next r
+
+    Dim inconsistencies As Long: inconsistencies = 0
+    For Each key In dictGFResume.Keys
+        If dictGFComp.Exists(key) Then
+            If Abs(CDbl(dictGFResume(key)) - CDbl(dictGFComp(key))) > 0.5 Then inconsistencies = inconsistencies + 1
+        End If
+    Next key
+
+    Dim auditMsg As String
+    auditMsg = "Résumé, comparatif et trace créés."
+    If inconsistencies > 0 Then
+        auditMsg = auditMsg & " Alerte: " & inconsistencies & " incohérence(s) GF par dirigeant détectée(s)."
+    End If
+    MsgBox auditMsg
     wbSource.Close SaveChanges:=False
 
     ' Restaurer les options
