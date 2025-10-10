@@ -616,6 +616,10 @@ Sub ResumerCCI()
             Dim pi As PivotItem
             Dim allowedCount As Long
             Set pf = pt.PivotFields("Dirigeant")
+
+            ' Regrouper les changements de visibilité pour accélérer
+            pt.ManualUpdate = True
+
             allowedCount = 0
             For Each pi In pf.PivotItems
                 If allowedDir.Exists(CStr(pi.Name)) Then allowedCount = allowedCount + 1
@@ -628,6 +632,9 @@ Sub ResumerCCI()
                     If Not allowedDir.Exists(CStr(pi.Name)) Then pi.Visible = False
                 Next pi
             End If
+
+            pt.ManualUpdate = False
+            pt.RefreshTable
         End If
     End If
     On Error GoTo 0
