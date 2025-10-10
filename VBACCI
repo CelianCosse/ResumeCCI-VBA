@@ -31,6 +31,7 @@ Sub ResumerCCI()
 
     ' Dictionnaires pour sélection déterministe du dirigeant principal par ID
     Dim dictDirPrimary As Object, dictDirPrimaryKeyMap As Object
+    ' (Tout comparatif et affichage priorisent Dénomination; fallback Nom+Prénom)
     Dim dictOldDirPrimary As Object, dictOldDirPrimaryKeyMap As Object
     ' Map clé canonique -> libellé d'affichage
     Dim dirKeyToDisplay As Object
@@ -117,38 +118,39 @@ Sub ResumerCCI()
     Next i
 
     ' Map dirigeants (sélection déterministe du dirigeant principal par ID) et ensemble complet par ID
+    ' Map dirigeants pour affichage (préférence Dénomination) et pour comparatif (Nom+Prénom)
     Set dictDirPrimary = CreateObject("Scripting.Dictionary")
     Set dictDirPrimaryKeyMap = CreateObject("Scripting.Dictionary")
+    ' (pas de dictionnaires séparés désormais)
     Set dictAllDirByID = CreateObject("Scripting.Dictionary")
     Set dirKeyToDisplay = CreateObject("Scripting.Dictionary")
     For i = 2 To lastRowDir
         key = CanonicalId(wsDir.Cells(i, 2).Value)
         Dim denom As String
+        Dim displayForResume As String
         denom = Trim$(CStr(wsDir.Cells(i, 10).Value)) ' Colonne J = Dénomination
         If Len(denom) > 0 Then
-            dirDisplay = denom
+            displayForResume = denom
         Else
-            dirDisplay = NormalizeDisplayName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value) ' C (Nom) + E (Prénom 1)
+            displayForResume = NormalizeDisplayName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value) ' C (Nom) + E (Prénom 1)
         End If
-        canonKey = CanonicalKeyFromDisplay(dirDisplay)
+        ' Sélection déterministe pour affichage (clé canoniquement minimal)
+        canonKey = CanonicalKeyFromDisplay(displayForResume)
         If Len(canonKey) > 0 Then
             If Not dictDirPrimary.Exists(key) Then
-                dictDirPrimary.Add key, dirDisplay
+                dictDirPrimary.Add key, displayForResume
                 dictDirPrimaryKeyMap.Add key, canonKey
-            Else
-                If canonKey < dictDirPrimaryKeyMap(key) Then
-                    dictDirPrimary(key) = dirDisplay
-                    dictDirPrimaryKeyMap(key) = canonKey
-                End If
+            ElseIf canonKey < dictDirPrimaryKeyMap(key) Then
+                dictDirPrimary(key) = displayForResume
+                dictDirPrimaryKeyMap(key) = canonKey
             End If
-
-            ' Enregistrer tous les dirigeants par ID (set par clé canonique)
+            ' Enregistrer pour TRACE et libellé d'affichage (clé canonique)
             If Not dictAllDirByID.Exists(key) Then Set dictAllDirByID(key) = CreateObject("Scripting.Dictionary")
-            If Not dictAllDirByID(key).Exists(canonKey) Then
-                dictAllDirByID(key).Add canonKey, dirDisplay
-            End If
-            If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, dirDisplay
+            If Not dictAllDirByID(key).Exists(canonKey) Then dictAllDirByID(key).Add canonKey, displayForResume
+            If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, displayForResume
         End If
+
+        ' Plus de map séparée pour comparatif: tout priorise Dénomination
     Next i
 
     ' Map garants et montants
@@ -237,6 +239,7 @@ Sub ResumerCCI()
     Dim dirToGarantSet As Object, dirToGarantCount As Object
     Set dirToGarantSet = CreateObject("Scripting.Dictionary")
     For Each key In dictEnt.Keys
+        ' Utiliser la clé canonique priorisant Dénomination
         If dictDirPrimaryKeyMap.Exists(key) Then
             dirCanon = CStr(dictDirPrimaryKeyMap(key))
             If Not dirToGarantSet.Exists(dirCanon) Then Set dirToGarantSet(dirCanon) = CreateObject("Scripting.Dictionary")
@@ -267,7 +270,7 @@ Sub ResumerCCI()
             If dictGar.Exists(key) Then dataOut(idx, 6) = dictGar(key)
             If dictMont.Exists(key) Then dataOut(idx, 7) = dictMont(key)
             If dictAss.Exists(key) Then dataOut(idx, 8) = dictAss(key)
-            ' Nb garants pour ce dirigeant
+            ' Nb garants pour ce dirigeant (clé canonique priorisant Dénomination)
             If dictDirPrimaryKeyMap.Exists(key) Then
                 dirCanon = CStr(dictDirPrimaryKeyMap(key))
                 If dirToGarantCount.Exists(dirCanon) Then
@@ -344,20 +347,25 @@ Sub ResumerCCI()
         .PivotFields("Garant").Orientation = xlColumnField
         On Error GoTo 0
         .AddDataField .PivotFields("ID"), "Nb sociétés", xlCount
-        .RowGrand = False
-        .ColumnGrand = False
-        .ShowTableStyleRowStripes = True
-        ' Appliquer un filtre de valeur pour garder >1 garant en utilisant la colonne calculée si possible
         On Error Resume Next
-        If .PivotFields("Nb garants (dirigeant)") Is Nothing Then
-            ' champ non présent en TCD; ignorer
-        Else
-            ' Ajouter le champ en filtre et appliquer critère >1
-            .PivotFields("Nb garants (dirigeant)").Orientation = xlPageField
-            .PivotFields("Nb garants (dirigeant)").EnableItemSelection = False
-        End If
+        .AddDataField .PivotFields("Nb garants (dirigeant)"), "Nb garants", xlMax
         On Error GoTo 0
+        .RowGrand = True
+        .ColumnGrand = True
+        .ShowTableStyleRowStripes = True
     End With
+
+    ' Filtre de valeur: conserver uniquement les dirigeants avec Nb garants > 1
+    On Error Resume Next
+    Dim df As PivotField
+    Set df = Nothing
+    For Each df In pt.DataFields
+        If df.Name = "Nb garants" Or df.Caption = "Nb garants" Then Exit For
+    Next df
+    If Not df Is Nothing Then
+        pt.PivotFields("Dirigeant").PivotFilters.Add Type:=xlValueIsGreaterThan, DataField:=df, Value1:=1
+    End If
+    On Error GoTo 0
     pt.ManualUpdate = False
     pt.RefreshTable
 
@@ -435,16 +443,23 @@ Sub ResumerCCI()
                 End If
             Next i
 
-            ' Map dirigeants anciens (tous par ID)
+            ' Map dirigeants anciens (tous par ID) – Dénomination prioritaire
             Set dictOldAllDirByID = CreateObject("Scripting.Dictionary")
             For i = 2 To lastRowDirOld
                 key = CanonicalId(wsDirOld.Cells(i, 2).Value)
-                dirDisplay = NormalizeDisplayName(wsDirOld.Cells(i, 3).Value, wsDirOld.Cells(i, 5).Value)
-                canonKey = CanonicalKeyFromDisplay(dirDisplay)
+                Dim oldDenom As String
+                Dim oldDisplay As String
+                oldDenom = Trim$(CStr(wsDirOld.Cells(i, 10).Value))
+                If Len(oldDenom) > 0 Then
+                    oldDisplay = oldDenom
+                Else
+                    oldDisplay = NormalizeDisplayName(wsDirOld.Cells(i, 3).Value, wsDirOld.Cells(i, 5).Value)
+                End If
+                canonKey = CanonicalKeyFromDisplay(oldDisplay)
                 If Len(canonKey) > 0 Then
                     If Not dictOldAllDirByID.Exists(key) Then Set dictOldAllDirByID(key) = CreateObject("Scripting.Dictionary")
-                    If Not dictOldAllDirByID(key).Exists(canonKey) Then dictOldAllDirByID(key).Add canonKey, dirDisplay
-                    If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, dirDisplay
+                    If Not dictOldAllDirByID(key).Exists(canonKey) Then dictOldAllDirByID(key).Add canonKey, oldDisplay
+                    If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, oldDisplay
                 End If
             Next i
 
@@ -493,9 +508,10 @@ Sub ResumerCCI()
             Set dictOldDirSocCount = CreateObject("Scripting.Dictionary")
             Set dictOldDirTotalGF = CreateObject("Scripting.Dictionary")
 
-            For Each key In dictEntOld.Keys
-                If dictOldDirPrimaryKeyMap.Exists(key) Then
-                    dirCanon = CStr(dictOldDirPrimaryKeyMap(key))
+    For Each key In dictEntOld.Keys
+        ' Utiliser Nom+Prénom ancien (dictOldDirPrimaryKeyMap déjà basé sur Nom+Prénom)
+        If dictOldDirPrimaryKeyMap.Exists(key) Then
+            dirCanon = CStr(dictOldDirPrimaryKeyMap(key))
                     If Not dictOldDirSocCount.Exists(dirCanon) Then dictOldDirSocCount.Add dirCanon, 0
                     dictOldDirSocCount(dirCanon) = dictOldDirSocCount(dirCanon) + 1
 
