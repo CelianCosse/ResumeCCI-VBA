@@ -26,7 +26,7 @@ Sub ResumerCCI()
     Dim maxCount As Long
     Dim maxGarant As String
     Dim rowIndex As Long
-    Dim dirKey As String, dirDisplay As String, canonKey As String
+    Dim dirKey As String, dirDisplay As String, canonKey As Variant
     Dim oldCanonKey As String
 
     ' Dictionnaires pour sélection déterministe du dirigeant principal par ID
@@ -36,7 +36,7 @@ Sub ResumerCCI()
     Dim dirKeyToDisplay As Object
     ' Maps ID -> set de dirigeants (tous) pour agrégations par dirigeant
     Dim dictAllDirByID As Object, dictOldAllDirByID As Object
-    Dim dirCanon As String
+    Dim dirCanon As Variant
 
 
     ' Étape 1 : Ouvrir explorateur pour sélectionner le fichier source CCI
@@ -280,7 +280,7 @@ Sub ResumerCCI()
     FileNameOldCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez l'ancien fichier CCI (optionnel)")
     If Not (FileNameOldCCI = "False") Then
         On Error Resume Next
-        Set wbOld = Workbooks.Open(FileNameOldCCI)
+        Set wbOld = workbooks.Open(FileNameOldCCI)
         On Error GoTo 0
         If Not wbOld Is Nothing Then
             hasOld = True
@@ -651,4 +651,29 @@ Private Function CanonicalId(ByVal v As Variant) As String
     s = Replace(s, Chr$(160), " ")
     s = Trim$(s)
     CanonicalId = s
+End Function
+
+Private Function JoinDictValues(ByVal d As Object) As String
+    Dim k As Variant
+    Dim items() As String
+    Dim idx As Long
+
+    If d Is Nothing Then
+        JoinDictValues = ""
+        Exit Function
+    End If
+
+    If d.Count = 0 Then
+        JoinDictValues = ""
+        Exit Function
+    End If
+
+    ReDim items(0 To d.Count - 1)
+    idx = 0
+    For Each k In d.Keys
+        items(idx) = CStr(d(k))
+        idx = idx + 1
+    Next k
+
+    JoinDictValues = Join(items, ", ")
 End Function
