@@ -345,20 +345,25 @@ Sub ResumerCCI()
         .PivotFields("Garant").Orientation = xlColumnField
         On Error GoTo 0
         .AddDataField .PivotFields("ID"), "Nb sociétés", xlCount
-        .RowGrand = False
-        .ColumnGrand = False
-        .ShowTableStyleRowStripes = True
-        ' Appliquer un filtre de valeur pour garder >1 garant en utilisant la colonne calculée si possible
         On Error Resume Next
-        If .PivotFields("Nb garants (dirigeant)") Is Nothing Then
-            ' champ non présent en TCD; ignorer
-        Else
-            ' Ajouter le champ en filtre et appliquer critère >1
-            .PivotFields("Nb garants (dirigeant)").Orientation = xlPageField
-            .PivotFields("Nb garants (dirigeant)").EnableItemSelection = False
-        End If
+        .AddDataField .PivotFields("Nb garants (dirigeant)"), "Nb garants", xlMax
         On Error GoTo 0
+        .RowGrand = True
+        .ColumnGrand = True
+        .ShowTableStyleRowStripes = True
     End With
+
+    ' Filtre de valeur: conserver uniquement les dirigeants avec Nb garants > 1
+    On Error Resume Next
+    Dim df As PivotField
+    Set df = Nothing
+    For Each df In pt.DataFields
+        If df.Name = "Nb garants" Or df.Caption = "Nb garants" Then Exit For
+    Next df
+    If Not df Is Nothing Then
+        pt.PivotFields("Dirigeant").PivotFilters.Add Type:=xlValueIsGreaterThan, DataField:=df, Value1:=1
+    End If
+    On Error GoTo 0
     pt.ManualUpdate = False
     pt.RefreshTable
 
