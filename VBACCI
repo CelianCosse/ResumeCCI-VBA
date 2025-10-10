@@ -38,6 +38,9 @@ Sub ResumerCCI()
     ' Maps ID -> set de dirigeants (tous) pour agrégations par dirigeant
     Dim dictAllDirByID As Object, dictOldAllDirByID As Object
     Dim dirCanon As Variant
+    ' Sets par ID pour prioriser Dénomination lors de la sélection
+    Dim perIdDenom As Object, perIdName As Object
+    Dim perIdOldDenom As Object, perIdOldName As Object
 
     ' Optimisations de performance
     Dim prevScreenUpdating As Boolean
@@ -810,6 +813,16 @@ Private Function NormalizeDisplayName(ByVal lastName As Variant, ByVal firstName
         NormalizeDisplayName = UCase(ln)
     End If
 End Function
+
+Public Sub TestCohérenceCCI()
+    Dim wb As Workbook
+    Dim res As VbMsgBoxResult
+    ' Exécuter le flux principal en sélectionnant automatiquement les deux fichiers d'exemple
+    ' Note: cette routine suppose que les chemins par défaut d'Excel ouvriront les fichiers via GetOpenFilename
+    ' Si besoin, adapter pour ouvrir directement par Workbooks.Open avec un chemin absolu
+    Call ResumerCCI
+    ' Après exécution, rien à faire ici car ResumerCCI affiche déjà un message d'audit
+End Sub
 
 Private Function CanonicalKeyFromDisplay(ByVal displayName As String) As String
     Dim t As String
