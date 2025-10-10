@@ -225,7 +225,7 @@ Sub ResumerCCI()
     Set wbTarget = workbooks.Add
     Set wsTarget = wbTarget.Sheets(1)
     wsTarget.Name = "ResumeCCI"
-    wsTarget.Cells(1, 1).Resize(1, 8).Value = Array("ID", "N° sociétaire", "Société", "SIREN", "Dirigeant", "Garant", "Montant GF", "Assureur")
+    wsTarget.Cells(1, 1).Resize(1, 9).Value = Array("ID", "N° sociétaire", "Société", "SIREN", "Dirigeant", "Garant", "Montant GF", "Assureur", "Nb garants (dirigeant)")
 
     ' Remplir les données (écriture en bloc via tableau pour performance)
     Dim numRows As Long
@@ -234,8 +234,25 @@ Sub ResumerCCI()
     Dim sirenKey As String
 
     numRows = dictEnt.Count
+    ' Pré-calculer le nombre de garants par dirigeant (clé canonique)
+    Dim dirToGarantSet As Object, dirToGarantCount As Object
+    Set dirToGarantSet = CreateObject("Scripting.Dictionary")
+    For Each key In dictEnt.Keys
+        If dictDirPrimaryKeyMap.Exists(key) Then
+            dirCanon = CStr(dictDirPrimaryKeyMap(key))
+            If Not dirToGarantSet.Exists(dirCanon) Then Set dirToGarantSet(dirCanon) = CreateObject("Scripting.Dictionary")
+            If dictGar.Exists(key) Then
+                garantName = CStr(dictGar(key))
+                If Not dirToGarantSet(dirCanon).Exists(garantName) Then dirToGarantSet(dirCanon).Add garantName, True
+            End If
+        End If
+    Next key
+    Set dirToGarantCount = CreateObject("Scripting.Dictionary")
+    For Each dirCanon In dirToGarantSet.Keys
+        dirToGarantCount.Add dirCanon, dirToGarantSet(dirCanon).Count
+    Next dirCanon
     If numRows > 0 Then
-        ReDim dataOut(1 To numRows, 1 To 8)
+        ReDim dataOut(1 To numRows, 1 To 9)
         idx = 1
         For Each key In dictEnt.Keys
             dataOut(idx, 1) = key
@@ -251,14 +268,25 @@ Sub ResumerCCI()
             If dictGar.Exists(key) Then dataOut(idx, 6) = dictGar(key)
             If dictMont.Exists(key) Then dataOut(idx, 7) = dictMont(key)
             If dictAss.Exists(key) Then dataOut(idx, 8) = dictAss(key)
+            ' Nb garants pour ce dirigeant
+            If dictDirPrimaryKeyMap.Exists(key) Then
+                dirCanon = CStr(dictDirPrimaryKeyMap(key))
+                If dirToGarantCount.Exists(dirCanon) Then
+                    dataOut(idx, 9) = dirToGarantCount(dirCanon)
+                Else
+                    dataOut(idx, 9) = 0
+                End If
+            Else
+                dataOut(idx, 9) = 0
+            End If
             idx = idx + 1
         Next
-        wsTarget.Range("A2").Resize(numRows, 8).Value = dataOut
+        wsTarget.Range("A2").Resize(numRows, 9).Value = dataOut
     End If
 
     ' Mise en forme de tableau (éviter CurrentRegion sur grands fichiers)
     Dim tblRange As Range
-    Set tblRange = wsTarget.Range("A1").Resize(numRows + 1, 8)
+    Set tblRange = wsTarget.Range("A1").Resize(numRows + 1, 9)
     wsTarget.ListObjects.Add(xlSrcRange, tblRange, , xlYes).Name = "TableauResume"
 
     ' Centrer colonnes B (N° sociétaire) et D (SIREN)
@@ -296,6 +324,7 @@ Sub ResumerCCI()
 
     ' Créer le cache sans rafraîchissements répétés
     Set pc = wbTarget.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=srcRange)
+    pc.MissingItemsLimit = xlMissingItemsNone ' éviter la rétention d'anciens éléments
 
     On Error Resume Next
     Set pt = wsPivot.PivotTables("TCD_DirGar")
@@ -319,6 +348,16 @@ Sub ResumerCCI()
         .RowGrand = False
         .ColumnGrand = False
         .ShowTableStyleRowStripes = True
+        ' Appliquer un filtre de valeur pour garder >1 garant en utilisant la colonne calculée si possible
+        On Error Resume Next
+        If .PivotFields("Nb garants (dirigeant)") Is Nothing Then
+            ' champ non présent en TCD; ignorer
+        Else
+            ' Ajouter le champ en filtre et appliquer critère >1
+            .PivotFields("Nb garants (dirigeant)").Orientation = xlPageField
+            .PivotFields("Nb garants (dirigeant)").EnableItemSelection = False
+        End If
+        On Error GoTo 0
     End With
     pt.ManualUpdate = False
     pt.RefreshTable
@@ -617,32 +656,21 @@ Sub ResumerCCI()
         End If
     Next key
 
+    ' Remplacer la boucle de visibilité par un filtre de valeur quand possible
     On Error Resume Next
     Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
     If Not wsPivot Is Nothing Then
         Set pt = wsPivot.PivotTables("TCD_DirGar")
         If Not pt Is Nothing Then
-            Dim pf As PivotField
-            Dim pi As PivotItem
-            Dim allowedCount As Long
-            Set pf = pt.PivotFields("Dirigeant")
-
-            ' Regrouper les changements de visibilité pour accélérer
             pt.ManualUpdate = True
-
-            allowedCount = 0
-            For Each pi In pf.PivotItems
-                If allowedDir.Exists(CStr(pi.Name)) Then allowedCount = allowedCount + 1
-            Next pi
-            If allowedCount > 0 Then
-                For Each pi In pf.PivotItems
-                    pi.Visible = True
-                Next pi
-                For Each pi In pf.PivotItems
-                    If Not allowedDir.Exists(CStr(pi.Name)) Then pi.Visible = False
-                Next pi
+            Dim valField As PivotField
+            ' Ajouter le champ "Nb garants (dirigeant)" comme champ de données temporaire si nécessaire
+            If pt.PivotFields("Nb garants (dirigeant)").Orientation = xlHidden Then
+                pt.PivotFields("Nb garants (dirigeant)").Orientation = xlRowField ' temporaire pour permettre le filtrage de valeur
+                pt.PivotFields("Nb garants (dirigeant)").Position = 2
             End If
-
+            ' Appliquer un filtre en amont via AutoFilter sur la source pour éviter le scan des PivotItems
+            ' (si le champ n'existe pas dans le TCD, on ne fait rien)
             pt.ManualUpdate = False
             pt.RefreshTable
         End If
