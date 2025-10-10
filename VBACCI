@@ -113,6 +113,12 @@ Sub ResumerCCI()
     For i = 2 To lastRowDir
         key = CanonicalId(wsDir.Cells(i, 2).Value)
         dirDisplay = NormalizeDisplayName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value)
+        ' Si nom du dirigeant vide, utiliser la Dénomination (colonne J)
+        If Len(Trim$(dirDisplay)) = 0 Then
+            Dim denom As String
+            denom = Trim$(CStr(wsDir.Cells(i, 10).Value))
+            If Len(denom) > 0 Then dirDisplay = denom
+        End If
         canonKey = CanonicalKeyFromDisplay(dirDisplay)
         If Len(canonKey) > 0 Then
             If Not dictDirPrimary.Exists(key) Then
@@ -242,6 +248,61 @@ Sub ResumerCCI()
     wsTarget.Columns("G:G").NumberFormat = "#,##0, ""K€"""
 
     wsTarget.Columns.AutoFit
+
+    ' ==============================
+    ' Tableau croisé dynamique Dirigeant x Garant
+    ' ==============================
+    Dim wsPivot As Worksheet
+    Dim pc As PivotCache
+    Dim pt As PivotTable
+    Dim srcRange As Range
+    Dim destCell As Range
+
+    Set srcRange = wsTarget.ListObjects("TableauResume").Range
+
+    On Error Resume Next
+    Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
+    On Error GoTo 0
+    If wsPivot Is Nothing Then
+        Set wsPivot = wbTarget.Sheets.Add(After:=wsTarget)
+        wsPivot.Name = "PivotDirigeantGarant"
+    Else
+        wsPivot.Cells.Clear
+    End If
+
+    Set destCell = wsPivot.Range("A3")
+
+    Set pc = wbTarget.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=srcRange)
+
+    On Error Resume Next
+    Set pt = wsPivot.PivotTables("TCD_DirGar")
+    On Error GoTo 0
+    If pt Is Nothing Then
+        Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
+    Else
+        pt.ChangePivotCache pc
+        pt.TableRange2.Clear
+        Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
+    End If
+
+    With pt
+        .ClearAllFilters
+        On Error Resume Next
+        .PivotFields("Garant").Orientation = xlRowField
+        .PivotFields("Dirigeant").Orientation = xlColumnField
+        On Error GoTo 0
+        .AddDataField .PivotFields("ID"), "Nb sociétés", xlCount
+        .RowGrand = True
+        .ColumnGrand = True
+        .ShowTableStyleRowStripes = True
+    End With
+
+    On Error Resume Next
+    pt.TableStyle2 = "PivotStyleLight16"
+    On Error GoTo 0
+
+    If Not pt.DataBodyRange Is Nothing Then pt.DataBodyRange.NumberFormat = "0"
+    wsPivot.Columns.AutoFit
 
     ' ==============================
     ' Construire la feuille ComparatifDirigeants
