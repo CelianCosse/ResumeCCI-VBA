@@ -53,7 +53,6 @@ Sub ResumerCCI()
     Application.Calculation = xlCalculationManual
     Application.EnableEvents = False
     FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
-    If FileNameCCI = "False" Then GoTo Cleanup
     Set wbSource = workbooks.Open(FileNameCCI)
 
     ' Feuilles source
