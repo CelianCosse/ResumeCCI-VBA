@@ -348,25 +348,10 @@ Sub ResumerCCI()
         .PivotFields("Garant").Orientation = xlColumnField
         On Error GoTo 0
         .AddDataField .PivotFields("ID"), "Nb sociétés", xlCount
-        On Error Resume Next
-        .AddDataField .PivotFields("Nb garants (dirigeant)"), "Nb garants", xlMax
-        On Error GoTo 0
         .RowGrand = True
         .ColumnGrand = True
         .ShowTableStyleRowStripes = True
     End With
-
-    ' Filtre de valeur: conserver uniquement les dirigeants avec Nb garants > 1
-    On Error Resume Next
-    Dim df As PivotField
-    Set df = Nothing
-    For Each df In pt.DataFields
-        If df.Name = "Nb garants" Or df.Caption = "Nb garants" Then Exit For
-    Next df
-    If Not df Is Nothing Then
-        pt.PivotFields("Dirigeant").PivotFilters.Add Type:=xlValueIsGreaterThan, DataField:=df, Value1:=1
-    End If
-    On Error GoTo 0
     pt.ManualUpdate = False
     pt.RefreshTable
 
