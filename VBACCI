@@ -347,6 +347,8 @@ Sub ResumerCCI()
         .PivotFields("Garant").Orientation = xlColumnField
         On Error GoTo 0
         .AddDataField .PivotFields("ID"), "Nb sociétés", xlCount
+        ' Afficher le nombre de garants en zone Valeurs (utiliser Max pour éviter les doublons)
+        .AddDataField .PivotFields("Nb garants (dirigeant)"), "Nb garants", xlMax
         .RowGrand = True
         .ColumnGrand = True
         .ShowTableStyleRowStripes = True
@@ -643,39 +645,7 @@ Sub ResumerCCI()
 
     wsComp.Columns.AutoFit
 
-    ' ==============================
-    ' Filtrer le TCD pour ne garder que les dirigeants avec plusieurs garants
-    ' ==============================
-    Dim allowedDir As Object
-    Set allowedDir = CreateObject("Scripting.Dictionary")
-    For Each key In dictDirGarantFreq.Keys
-        If dictDirGarantFreq(key).Count > 1 Then
-            If dirKeyToDisplay.Exists(key) Then
-                If Not allowedDir.Exists(dirKeyToDisplay(key)) Then allowedDir.Add dirKeyToDisplay(key), True
-            End If
-        End If
-    Next key
-
-    ' Remplacer la boucle de visibilité par un filtre de valeur quand possible
-    On Error Resume Next
-    Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
-    If Not wsPivot Is Nothing Then
-        Set pt = wsPivot.PivotTables("TCD_DirGar")
-        If Not pt Is Nothing Then
-            pt.ManualUpdate = True
-            Dim valField As PivotField
-            ' Ajouter le champ "Nb garants (dirigeant)" comme champ de données temporaire si nécessaire
-            If pt.PivotFields("Nb garants (dirigeant)").Orientation = xlHidden Then
-                pt.PivotFields("Nb garants (dirigeant)").Orientation = xlRowField ' temporaire pour permettre le filtrage de valeur
-                pt.PivotFields("Nb garants (dirigeant)").Position = 2
-            End If
-            ' Appliquer un filtre en amont via AutoFilter sur la source pour éviter le scan des PivotItems
-            ' (si le champ n'existe pas dans le TCD, on ne fait rien)
-            pt.ManualUpdate = False
-            pt.RefreshTable
-        End If
-    End If
-    On Error GoTo 0
+    ' Champ "Nb garants (dirigeant)" désormais en zone Valeurs — aucun hack de ligne nécessaire
 
     ' ==============================
     ' Feuille de trace pour audit (IDs, dirigeants et principaux)
