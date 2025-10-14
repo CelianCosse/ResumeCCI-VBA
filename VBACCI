@@ -1,3 +1,7 @@
+Public gOverrideNewCCI As String
+Public gOverrideOldCCI As String
+Public gOverridePortefeuille As String
+
 Sub ResumerCCI()
 
     Dim FileNameCCI As String, FileNamePortefeuille As String
@@ -37,6 +41,9 @@ Sub ResumerCCI()
     Dim dirKeyToDisplay As Object
     ' Maps ID -> set de dirigeants (tous) pour agrégations par dirigeant
     Dim dictAllDirByID As Object, dictOldAllDirByID As Object
+    ' Sets par ID pour imposer priorité à Dénomination (actuel et ancien)
+    Dim dictDenomsByID As Object, dictNamesByID As Object
+    Dim dictOldDenomsByID As Object, dictOldNamesByID As Object
     Dim dirCanon As Variant
 
     ' Optimisations de performance
@@ -53,7 +60,12 @@ Sub ResumerCCI()
     Application.ScreenUpdating = False
     Application.Calculation = xlCalculationManual
     Application.EnableEvents = False
-    FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
+    If Len(gOverrideNewCCI) > 0 Then
+        FileNameCCI = gOverrideNewCCI
+    Else
+        FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
+        If FileNameCCI = "False" Then GoTo RestoreAndExit
+    End If
     Set wbSource = workbooks.Open(FileNameCCI)
 
     ' Feuilles source
@@ -117,13 +129,13 @@ Sub ResumerCCI()
         End If
     Next i
 
-    ' Map dirigeants (sélection déterministe du dirigeant principal par ID) et ensemble complet par ID
-    ' Map dirigeants pour affichage (préférence Dénomination) et pour comparatif (Nom+Prénom)
+    ' Map dirigeants (constitution des sets Dénomination/Nom par ID), puis choix principal avec priorité à Dénomination
     Set dictDirPrimary = CreateObject("Scripting.Dictionary")
     Set dictDirPrimaryKeyMap = CreateObject("Scripting.Dictionary")
-    ' (pas de dictionnaires séparés désormais)
     Set dictAllDirByID = CreateObject("Scripting.Dictionary")
     Set dirKeyToDisplay = CreateObject("Scripting.Dictionary")
+    Set dictDenomsByID = CreateObject("Scripting.Dictionary")
+    Set dictNamesByID = CreateObject("Scripting.Dictionary")
     For i = 2 To lastRowDir
         key = CanonicalId(wsDir.Cells(i, 2).Value)
         Dim denom As String
@@ -134,24 +146,55 @@ Sub ResumerCCI()
         Else
             displayForResume = NormalizeDisplayName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value) ' C (Nom) + E (Prénom 1)
         End If
-        ' Sélection déterministe pour affichage (clé canoniquement minimal)
         canonKey = CanonicalKeyFromDisplay(displayForResume)
-        If Len(canonKey) > 0 Then
-            If Not dictDirPrimary.Exists(key) Then
-                dictDirPrimary.Add key, displayForResume
-                dictDirPrimaryKeyMap.Add key, canonKey
-            ElseIf canonKey < dictDirPrimaryKeyMap(key) Then
-                dictDirPrimary(key) = displayForResume
-                dictDirPrimaryKeyMap(key) = canonKey
-            End If
-            ' Enregistrer pour TRACE et libellé d'affichage (clé canonique)
-            If Not dictAllDirByID.Exists(key) Then Set dictAllDirByID(key) = CreateObject("Scripting.Dictionary")
-            If Not dictAllDirByID(key).Exists(canonKey) Then dictAllDirByID(key).Add canonKey, displayForResume
-            If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, displayForResume
+        If Len(canonKey) = 0 Then GoTo NextDirRow
+
+        ' Enregistrer pour TRACE (ensemble complet)
+        If Not dictAllDirByID.Exists(key) Then Set dictAllDirByID(key) = CreateObject("Scripting.Dictionary")
+        If Not dictAllDirByID(key).Exists(canonKey) Then dictAllDirByID(key).Add canonKey, displayForResume
+        If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, displayForResume
+
+        ' Enregistrer dans le bon set (Dénomination prioritaire)
+        If Len(denom) > 0 Then
+            If Not dictDenomsByID.Exists(key) Then Set dictDenomsByID(key) = CreateObject("Scripting.Dictionary")
+            If Not dictDenomsByID(key).Exists(canonKey) Then dictDenomsByID(key).Add canonKey, displayForResume
+        Else
+            If Not dictNamesByID.Exists(key) Then Set dictNamesByID(key) = CreateObject("Scripting.Dictionary")
+            If Not dictNamesByID(key).Exists(canonKey) Then dictNamesByID(key).Add canonKey, displayForResume
         End If
 
-        ' Plus de map séparée pour comparatif: tout priorise Dénomination
+NextDirRow:
     Next i
+
+    ' Choisir le dirigeant principal par ID: priorité aux Dénominations, sinon Nom+Prénom; clé canonique minimale pour stabilité
+    Dim idPick As Variant, minCanon As String, dispPick As String
+    ' Unir les IDs connus
+    Dim idsAll As Object: Set idsAll = CreateObject("Scripting.Dictionary")
+    For Each idPick In dictDenomsByID.Keys: If Not idsAll.Exists(idPick) Then idsAll.Add idPick, True: Next idPick
+    For Each idPick In dictNamesByID.Keys: If Not idsAll.Exists(idPick) Then idsAll.Add idPick, True: Next idPick
+    For Each idPick In idsAll.Keys
+        minCanon = "": dispPick = ""
+        If dictDenomsByID.Exists(idPick) And dictDenomsByID(idPick).Count > 0 Then
+            For Each canonKey In dictDenomsByID(idPick).Keys
+                If minCanon = "" Or canonKey < minCanon Then
+                    minCanon = canonKey
+                    dispPick = dictDenomsByID(idPick)(canonKey)
+                End If
+            Next canonKey
+        ElseIf dictNamesByID.Exists(idPick) And dictNamesByID(idPick).Count > 0 Then
+            For Each canonKey In dictNamesByID(idPick).Keys
+                If minCanon = "" Or canonKey < minCanon Then
+                    minCanon = canonKey
+                    dispPick = dictNamesByID(idPick)(canonKey)
+                End If
+            Next canonKey
+        End If
+        If Len(minCanon) > 0 Then
+            dictDirPrimary(idPick) = dispPick
+            dictDirPrimaryKeyMap(idPick) = minCanon
+            If Not dirKeyToDisplay.Exists(minCanon) Then dirKeyToDisplay.Add minCanon, dispPick
+        End If
+    Next idPick
 
     ' Map garants et montants
     For i = 2 To lastRowGar
@@ -193,7 +236,11 @@ Sub ResumerCCI()
     Next i
 
     ' Étape 2 : Ouvrir explorateur pour sélectionner le fichier portefeuille
-    FileNamePortefeuille = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le fichier portefeuille client")
+    If Len(gOverridePortefeuille) > 0 Then
+        FileNamePortefeuille = gOverridePortefeuille
+    Else
+        FileNamePortefeuille = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le fichier portefeuille client")
+    End If
     If FileNamePortefeuille = "False" Then
         MsgBox "Aucun fichier portefeuille sélectionné. N° sociétaire restera vide."
     Else
@@ -395,7 +442,11 @@ Sub ResumerCCI()
 
     ' Agrégats anciens (optionnels) par dirigeant
     hasOld = False
-    FileNameOldCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez l'ancien fichier CCI (optionnel)")
+    If Len(gOverrideOldCCI) > 0 Then
+        FileNameOldCCI = gOverrideOldCCI
+    Else
+        FileNameOldCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez l'ancien fichier CCI (optionnel)")
+    End If
     If Not (FileNameOldCCI = "False") Then
         On Error Resume Next
         Set wbOld = workbooks.Open(FileNameOldCCI)
@@ -430,6 +481,8 @@ Sub ResumerCCI()
 
             ' Map dirigeants anciens (tous par ID) – Dénomination prioritaire
             Set dictOldAllDirByID = CreateObject("Scripting.Dictionary")
+            Set dictOldDenomsByID = CreateObject("Scripting.Dictionary")
+            Set dictOldNamesByID = CreateObject("Scripting.Dictionary")
             For i = 2 To lastRowDirOld
                 key = CanonicalId(wsDirOld.Cells(i, 2).Value)
                 Dim oldDenom As String
@@ -444,6 +497,13 @@ Sub ResumerCCI()
                 If Len(canonKey) > 0 Then
                     If Not dictOldAllDirByID.Exists(key) Then Set dictOldAllDirByID(key) = CreateObject("Scripting.Dictionary")
                     If Not dictOldAllDirByID(key).Exists(canonKey) Then dictOldAllDirByID(key).Add canonKey, oldDisplay
+                    If Len(oldDenom) > 0 Then
+                        If Not dictOldDenomsByID.Exists(key) Then Set dictOldDenomsByID(key) = CreateObject("Scripting.Dictionary")
+                        If Not dictOldDenomsByID(key).Exists(canonKey) Then dictOldDenomsByID(key).Add canonKey, oldDisplay
+                    Else
+                        If Not dictOldNamesByID.Exists(key) Then Set dictOldNamesByID(key) = CreateObject("Scripting.Dictionary")
+                        If Not dictOldNamesByID(key).Exists(canonKey) Then dictOldNamesByID(key).Add canonKey, oldDisplay
+                    End If
                     If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, oldDisplay
                 End If
             Next i
@@ -470,19 +530,28 @@ Sub ResumerCCI()
 
             ' (Assureurs anciens non nécessaires pour ce comparatif)
 
-            ' Sélection du dirigeant principal ancien par ID (même règle déterministe)
+            ' Sélection du dirigeant principal ancien par ID (priorité Dénomination puis clé min)
             Set dictOldDirPrimary = CreateObject("Scripting.Dictionary")
             Set dictOldDirPrimaryKeyMap = CreateObject("Scripting.Dictionary")
-            Dim idKey As Variant, minCanon As String, disp As String
+            Dim idKey As Variant, disp As String
             For Each idKey In dictOldAllDirByID.Keys
-                minCanon = ""
-                For Each canonKey In dictOldAllDirByID(idKey).Keys
-                    If minCanon = "" Or canonKey < minCanon Then
-                        minCanon = canonKey
-                    End If
-                Next canonKey
+                minCanon = "": disp = ""
+                If dictOldDenomsByID.Exists(idKey) And dictOldDenomsByID(idKey).Count > 0 Then
+                    For Each canonKey In dictOldDenomsByID(idKey).Keys
+                        If minCanon = "" Or canonKey < minCanon Then
+                            minCanon = canonKey
+                            disp = dictOldDenomsByID(idKey)(canonKey)
+                        End If
+                    Next canonKey
+                ElseIf dictOldNamesByID.Exists(idKey) And dictOldNamesByID(idKey).Count > 0 Then
+                    For Each canonKey In dictOldNamesByID(idKey).Keys
+                        If minCanon = "" Or canonKey < minCanon Then
+                            minCanon = canonKey
+                            disp = dictOldNamesByID(idKey)(canonKey)
+                        End If
+                    Next canonKey
+                End If
                 If Len(minCanon) > 0 Then
-                    disp = dictOldAllDirByID(idKey)(minCanon)
                     dictOldDirPrimary.Add idKey, disp
                     dictOldDirPrimaryKeyMap.Add idKey, minCanon
                     If Not dirKeyToDisplay.Exists(minCanon) Then dirKeyToDisplay.Add minCanon, disp
@@ -643,39 +712,7 @@ Sub ResumerCCI()
 
     wsComp.Columns.AutoFit
 
-    ' ==============================
-    ' Filtrer le TCD pour ne garder que les dirigeants avec plusieurs garants
-    ' ==============================
-    Dim allowedDir As Object
-    Set allowedDir = CreateObject("Scripting.Dictionary")
-    For Each key In dictDirGarantFreq.Keys
-        If dictDirGarantFreq(key).Count > 1 Then
-            If dirKeyToDisplay.Exists(key) Then
-                If Not allowedDir.Exists(dirKeyToDisplay(key)) Then allowedDir.Add dirKeyToDisplay(key), True
-            End If
-        End If
-    Next key
-
-    ' Remplacer la boucle de visibilité par un filtre de valeur quand possible
-    On Error Resume Next
-    Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
-    If Not wsPivot Is Nothing Then
-        Set pt = wsPivot.PivotTables("TCD_DirGar")
-        If Not pt Is Nothing Then
-            pt.ManualUpdate = True
-            Dim valField As PivotField
-            ' Ajouter le champ "Nb garants (dirigeant)" comme champ de données temporaire si nécessaire
-            If pt.PivotFields("Nb garants (dirigeant)").Orientation = xlHidden Then
-                pt.PivotFields("Nb garants (dirigeant)").Orientation = xlRowField ' temporaire pour permettre le filtrage de valeur
-                pt.PivotFields("Nb garants (dirigeant)").Position = 2
-            End If
-            ' Appliquer un filtre en amont via AutoFilter sur la source pour éviter le scan des PivotItems
-            ' (si le champ n'existe pas dans le TCD, on ne fait rien)
-            pt.ManualUpdate = False
-            pt.RefreshTable
-        End If
-    End If
-    On Error GoTo 0
+    ' TCD simplifié: pas de champs supplémentaires ni filtrage programmatique
 
     ' ==============================
     ' Feuille de trace pour audit (IDs, dirigeants et principaux)
@@ -769,19 +806,119 @@ Sub ResumerCCI()
         End If
     Next key
 
-    Dim auditMsg As String
-    auditMsg = "Résumé, comparatif et trace créés."
-    If inconsistencies > 0 Then
-        auditMsg = auditMsg & " Alerte: " & inconsistencies & " incohérence(s) GF par dirigeant détectée(s)."
+    ' Audits complémentaires
+    Dim sumTotalSoc As Long, sumMovSoc As Long
+    Dim sumGFComp As Double, sumGFCurr As Double, sumGFOld As Double
+    Dim nCurrIDs As Long, nOldIDs As Long
+    nCurrIDs = dictEnt.Count
+    If hasOld Then nOldIDs = dictEntOld.Count Else nOldIDs = 0
+
+    ' Sommes depuis comparatif
+    For r = 2 To compLast
+        If IsNumeric(wsComp.Cells(r, 2).Value) Then sumTotalSoc = sumTotalSoc + CLng(wsComp.Cells(r, 2).Value)
+        If IsNumeric(wsComp.Cells(r, 4).Value) Then sumMovSoc = sumMovSoc + CLng(wsComp.Cells(r, 4).Value)
+        If IsNumeric(wsComp.Cells(r, 5).Value) Then sumGFComp = sumGFComp + CDbl(wsComp.Cells(r, 5).Value)
+    Next r
+
+    ' Sommes GF globales (actuel et ancien)
+    For Each key In dictMont.Keys
+        If IsNumeric(dictMont(key)) Then sumGFCurr = sumGFCurr + CDbl(dictMont(key))
+    Next key
+    If hasOld Then
+        For Each key In dictMontOld.Keys
+            If IsNumeric(dictMontOld(key)) Then sumGFOld = sumGFOld + CDbl(dictMontOld(key))
+        Next key
     End If
+
+    Dim sumMovGFAll As Double
+    For r = 2 To compLast
+        If IsNumeric(wsComp.Cells(r, 6).Value) Then sumMovGFAll = sumMovGFAll + CDbl(wsComp.Cells(r, 6).Value)
+    Next r
+
+    Dim incoh As Long: incoh = inconsistencies
+    If sumTotalSoc <> nCurrIDs Then incoh = incoh + 1
+    If sumMovSoc <> (nCurrIDs - nOldIDs) Then incoh = incoh + 1
+    If Abs(sumGFComp - sumGFCurr) > 0.5 Then incoh = incoh + 1
+    If Abs(sumMovGFAll - (sumGFCurr - sumGFOld)) > 0.5 Then incoh = incoh + 1
+
+    ' Vérifier priorité Dénomination: si ID a à la fois Dénomination et Nom, principal doit être une Dénomination
+    Dim bothCurr As Long, wrongPickCurr As Long
+    For Each key In dictAllDirByID.Keys
+        Dim hasDen As Boolean, hasName As Boolean
+        hasDen = False: hasName = False
+        ' Déterminer via présence dans dictDenomsByID/dictNamesByID
+        If dictDenomsByID.Exists(key) Then hasDen = (dictDenomsByID(key).Count > 0)
+        If dictNamesByID.Exists(key) Then hasName = (dictNamesByID(key).Count > 0)
+        If hasDen And hasName Then
+            bothCurr = bothCurr + 1
+            If dictDirPrimaryKeyMap.Exists(key) Then
+                Dim picked As String: picked = CStr(dictDirPrimaryKeyMap(key))
+                If Not dictDenomsByID(key).Exists(picked) Then wrongPickCurr = wrongPickCurr + 1
+            End If
+        End If
+    Next key
+
+    Dim bothOld As Long, wrongPickOld As Long
+    If hasOld Then
+        For Each key In dictOldAllDirByID.Keys
+            Dim oDen As Boolean, oName As Boolean
+            oDen = False: oName = False
+            If dictOldDenomsByID.Exists(key) Then oDen = (dictOldDenomsByID(key).Count > 0)
+            If dictOldNamesByID.Exists(key) Then oName = (dictOldNamesByID(key).Count > 0)
+            If oDen And oName Then
+                bothOld = bothOld + 1
+                If dictOldDirPrimaryKeyMap.Exists(key) Then
+                    Dim opicked As String: opicked = CStr(dictOldDirPrimaryKeyMap(key))
+                    If Not dictOldDenomsByID(key).Exists(opicked) Then wrongPickOld = wrongPickOld + 1
+                End If
+            End If
+        Next key
+    End If
+
+    Dim auditMsg As String
+    auditMsg = "Résumé, comparatif et trace créés." & vbCrLf & _
+               "- Incohérences GF par dirigeant: " & inconsistencies & vbCrLf & _
+               "- Somme Total sociétés vs IDs: " & sumTotalSoc & " vs " & nCurrIDs & vbCrLf & _
+               "- Somme Mouvement sociétés vs ΔIDs: " & sumMovSoc & " vs " & (nCurrIDs - nOldIDs) & vbCrLf & _
+               "- Somme GF comp vs GF actuel: " & Format(sumGFComp, "0") & " vs " & Format(sumGFCurr, "0") & vbCrLf & _
+               "- Somme Mouvement GF vs ΔGF: " & Format(sumMovGFAll, "0") & " vs " & Format(sumGFCurr - sumGFOld, "0")
+    If bothCurr > 0 Then auditMsg = auditMsg & vbCrLf & _
+        "- IDs avec Dénomination+Nom (actuel): " & bothCurr & ", mauvais choix: " & wrongPickCurr
+    If hasOld And bothOld > 0 Then auditMsg = auditMsg & vbCrLf & _
+        "- IDs avec Dénomination+Nom (ancien): " & bothOld & ", mauvais choix: " & wrongPickOld
+    If incoh > 0 Then auditMsg = auditMsg & vbCrLf & "Alerte: audits détectent " & incoh & " incohérence(s)."
+
     MsgBox auditMsg
+
     wbSource.Close SaveChanges:=False
 
+RestoreAndExit:
     ' Restaurer les options
     Application.ScreenUpdating = prevScreenUpdating
     Application.Calculation = prevCalculation
     Application.EnableEvents = prevEnableEvents
 
+End Sub
+
+Public Sub TestCohérenceCCI()
+    ' Tente d'exécuter ResumerCCI en utilisant les fichiers d'exemple présents à côté du classeur.
+    On Error GoTo SafeClean
+    Dim basePath As String
+    Dim fNew As String, fOld As String
+    basePath = ThisWorkbook.Path
+    fNew = basePath & Application.PathSeparator & "open-data-caim Nouveau compressé.xlsx"
+    fOld = basePath & Application.PathSeparator & "open-data-caim - Compressé.xlsx"
+
+    If Dir(fNew, vbNormal) <> "" Then gOverrideNewCCI = fNew Else gOverrideNewCCI = ""
+    If Dir(fOld, vbNormal) <> "" Then gOverrideOldCCI = fOld Else gOverrideOldCCI = ""
+    gOverridePortefeuille = "" ' optionnel
+
+    Call ResumerCCI
+
+SafeClean:
+    gOverrideNewCCI = ""
+    gOverrideOldCCI = ""
+    gOverridePortefeuille = ""
 End Sub
 
 Private Function NormalizeDisplayName(ByVal lastName As Variant, ByVal firstName As Variant) As String
