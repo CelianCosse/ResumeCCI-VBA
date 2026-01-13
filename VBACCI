@@ -1,579 +1,837 @@
 Sub ResumerCCI()
 
-    Dim FileNameCCI As String, FileNamePortefeuille As String
-    Dim wbSource As Workbook, wbPortefeuille As Workbook, wbTarget As Workbook
-    Dim wsEnt As Worksheet, wsDir As Worksheet, wsGar As Worksheet, wsAss As Worksheet, wsBaseCA As Worksheet, wsTarget As Worksheet
-    Dim dictEnt As Object, dictDir As Object, dictGar As Object, dictMont As Object, dictAss As Object, dictSoc As Object
-    Dim dictHom As Object
-    Dim lastRowEnt As Long, lastRowDir As Long, lastRowGar As Long, lastRowAss As Long, lastRowBaseCA As Long
-    Dim i As Long, j As Long
-    Dim key As Variant, valeur As Variant, montant As Variant
-    Dim colSIREN As Long, colSOC As Long
+Dim FileNameCCI As String, FileNamePortefeuille As String
+Dim wbSource As Workbook, wbPortefeuille As Workbook, wbTarget As Workbook
+Dim wsEnt As Worksheet, wsDir As Worksheet, wsGar As Worksheet, wsAss As Worksheet, wsBaseCA As Worksheet, wsTarget As Worksheet
+Dim dictEnt As Object, dictDir As Object, dictGar As Object, dictMont As Object, dictAss As Object, dictSoc As Object
+Dim dictHom As Object
+Dim lastRowEnt As Long, lastRowDir As Long, lastRowGar As Long, lastRowAss As Long, lastRowBaseCA As Long
+Dim i As Long, j As Long
+Dim key As Variant, valeur As Variant, montant As Variant
+Dim colSIREN As Long, colSOC As Long
 
-    ' Ajouts pour feuille ComparatifDirigeants
-    Dim wsComp As Worksheet
-    Dim FileNameOldCCI As String
-    Dim wbOld As Workbook
-    Dim wsEntOld As Worksheet, wsDirOld As Worksheet, wsGarOld As Worksheet, wsAssOld As Worksheet
-    Dim lastRowEntOld As Long, lastRowDirOld As Long, lastRowGarOld As Long, lastRowAssOld As Long
-    Dim dictEntOld As Object, dictDirOld As Object, dictGarOld As Object, dictMontOld As Object
-    Dim dictDirSocCount As Object, dictDirTotalGF As Object, dictDirGarantFreq As Object
-    Dim dictOldDirSocCount As Object, dictOldDirTotalGF As Object
-    Dim allDirNames As Object
-    Dim hasOld As Boolean
-    Dim dirName As String, garantName As String
-    Dim subDict As Object
-    Dim maxCount As Long
-    Dim maxGarant As String
-    Dim rowIndex As Long
-    Dim dirKey As String, dirDisplay As String, canonKey As Variant
-    Dim oldCanonKey As String
+' Ajouts pour feuille ComparatifDirigeants
+Dim wsComp As Worksheet
+Dim FileNameOldCCI As String
+Dim wbOld As Workbook
+Dim wsEntOld As Worksheet, wsDirOld As Worksheet, wsGarOld As Worksheet, wsAssOld As Worksheet
+Dim lastRowEntOld As Long, lastRowDirOld As Long, lastRowGarOld As Long, lastRowAssOld As Long
+Dim dictEntOld As Object, dictDirOld As Object, dictGarOld As Object, dictMontOld As Object
+Dim dictDirSocCount As Object, dictDirTotalGF As Object, dictDirGarantFreq As Object
+Dim dictOldDirSocCount As Object, dictOldDirTotalGF As Object
+Dim allDirNames As Object
+Dim hasOld As Boolean
+Dim dirName As String, garantName As String
+Dim subDict As Object
+Dim maxCount As Long
+Dim maxGarant As String
+Dim rowIndex As Long
+Dim dirKey As String, dirDisplay As String, canonKey As Variant
+Dim oldCanonKey As String
 
-    ' Dictionnaires pour sélection déterministe du dirigeant principal par ID
-    Dim dictDirPrimary As Object, dictDirPrimaryKeyMap As Object
-    ' (Tout comparatif et affichage priorisent Dénomination; fallback Nom+Prénom)
-    Dim dictOldDirPrimary As Object, dictOldDirPrimaryKeyMap As Object
-    ' Map clé canonique -> libellé d'affichage
-    Dim dirKeyToDisplay As Object
-    ' Maps ID -> set de dirigeants (tous) pour agrégations par dirigeant
-    Dim dictAllDirByID As Object, dictOldAllDirByID As Object
-    Dim dirCanon As Variant
+' Dictionnaires pour sélection déterministe du dirigeant principal par ID
+Dim dictDirPrimary As Object, dictDirPrimaryKeyMap As Object
+' (Tout comparatif et affichage priorisent Dénomination; fallback Nom+Prénom)
+Dim dictOldDirPrimary As Object, dictOldDirPrimaryKeyMap As Object
+' Map clé canonique -> libellé d'affichage
+Dim dirKeyToDisplay As Object
+' Maps ID -> set de dirigeants (tous) pour agrégations par dirigeant
+Dim dictAllDirByID As Object, dictOldAllDirByID As Object
+Dim dirCanon As Variant
 
-    ' Optimisations de performance
-    Dim prevScreenUpdating As Boolean
-    Dim prevCalculation As XlCalculation
-    Dim prevEnableEvents As Boolean
+' Optimisations de performance
+Dim prevScreenUpdating As Boolean
+Dim prevCalculation As XlCalculation
+Dim prevEnableEvents As Boolean
+Dim pq As WorkbookQuery
+Dim pqTable As ListObject
+Dim conn As WorkbookConnection
 
+' Étape 1 : Ouvrir explorateur pour sélectionner le fichier source CCI
+' Sauvegarder et désactiver les options coûteuses
+prevScreenUpdating = Application.ScreenUpdating
+prevCalculation = Application.Calculation
+prevEnableEvents = Application.EnableEvents
+Application.ScreenUpdating = False
+Application.Calculation = xlCalculationManual
+Application.EnableEvents = False
+FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
+Set wbSource = workbooks.Open(FileNameCCI)
 
-    ' Étape 1 : Ouvrir explorateur pour sélectionner le fichier source CCI
-    ' Sauvegarder et désactiver les options coûteuses
-    prevScreenUpdating = Application.ScreenUpdating
-    prevCalculation = Application.Calculation
-    prevEnableEvents = Application.EnableEvents
-    Application.ScreenUpdating = False
-    Application.Calculation = xlCalculationManual
-    Application.EnableEvents = False
-    FileNameCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le nouveau fichier CCI")
-    Set wbSource = workbooks.Open(FileNameCCI)
+' Feuilles source
+Set wsEnt = wbSource.Sheets("Entreprise")
+Set wsDir = wbSource.Sheets("Dirigeant")
+Set wsGar = wbSource.Sheets("Garant")
+Set wsAss = wbSource.Sheets("Assureur")
 
-    ' Feuilles source
-    Set wsEnt = wbSource.Sheets("Entreprise")
-    Set wsDir = wbSource.Sheets("Dirigeant")
-    Set wsGar = wbSource.Sheets("Garant")
-    Set wsAss = wbSource.Sheets("Assureur")
+' Dernières lignes
+lastRowEnt = wsEnt.Cells(wsEnt.Rows.Count, 1).End(xlUp).row
+lastRowDir = wsDir.Cells(wsDir.Rows.Count, 1).End(xlUp).row
+lastRowGar = wsGar.Cells(wsGar.Rows.Count, 1).End(xlUp).row
+lastRowAss = wsAss.Cells(wsAss.Rows.Count, 1).End(xlUp).row
 
-    ' Dernières lignes
-    lastRowEnt = wsEnt.Cells(wsEnt.Rows.Count, 1).End(xlUp).Row
-    lastRowDir = wsDir.Cells(wsDir.Rows.Count, 1).End(xlUp).Row
-    lastRowGar = wsGar.Cells(wsGar.Rows.Count, 1).End(xlUp).Row
-    lastRowAss = wsAss.Cells(wsAss.Rows.Count, 1).End(xlUp).Row
+' Créer les dictionnaires
+Set dictEnt = CreateObject("Scripting.Dictionary")
+Set dictDir = CreateObject("Scripting.Dictionary")
+Set dictGar = CreateObject("Scripting.Dictionary")
+Set dictMont = CreateObject("Scripting.Dictionary")
+Set dictAss = CreateObject("Scripting.Dictionary")
+Set dictHom = CreateObject("Scripting.Dictionary")
 
-    ' Créer les dictionnaires
-    Set dictEnt = CreateObject("Scripting.Dictionary")
-    Set dictDir = CreateObject("Scripting.Dictionary")
-    Set dictGar = CreateObject("Scripting.Dictionary")
-    Set dictMont = CreateObject("Scripting.Dictionary")
-    Set dictAss = CreateObject("Scripting.Dictionary")
-    Set dictHom = CreateObject("Scripting.Dictionary")
+' ============================================================================
+' DICTIONNAIRE COMPLET
+' ============================================================================
 
-    ' Remplacements pour homonymes (ajoutez/modifiez manuellement ici)
-    With dictHom
-        .Add "GAL", "GALIAN-SMABTP"
-        .Add "GAILIAN", "GALIAN-SMABTP"
-        .Add "MMA", "MMA"
-        .Add "ALLIANZ", "ALLIANZ"
-        .Add "AXA", "AXA"
-        .Add "SO C", "SOCAF"
-        .Add "SO.", "SOCAF"
-        .Add "SOCA", "SOCAF"
-        .Add "SOCIETE DE CAUTION", "SOCAF"
-        .Add "SOCIÉTÉ DE CAUTION", "SOCAF"
-        .Add "QBE", "QBE"
-        .Add "GROUPAMA", "GROUPAMA"
-        .Add "GENERALI", "GENERALI"
-        .Add "CEGC", "CEGC"
-        .Add "COMPAGNIE EUR", "CEGC"
-        .Add "COMPANIE EUR", "CEGC"
-        .Add "LLOYD", "LLOYDS"
-        .Add "GROUPEMENT FRANCAIS", "GFC"
-        .Add "GFC", "GFC"
-        .Add "SMA", "GALIAN-SMABTP"
-        .Add "CIC", "CIC"
-        .Add "CREDIT IND", "CIC"
-        .Add "CAISSE FEDERALE", "CREDIT MUTUEL"
-        .Add " LACAISSE FEDERALE", "CREDIT MUTUEL"
-        .Add "CAISSE R", "CREDIT AGRICOLE"
-        .Add "(CAMCA", "CREDIT AGRICOLE"
-        .Add "CREDIT AGRICOLE", "CREDIT AGRICOLE"
-        .Add "CAISSE D'ASSURANCES MUTUELLES DU CREDIT AGRICOLE", "CREDIT AGRICOLE"
-        .Add "CAISSE D'EPARGNE", "CAISSE D'EPARGNE"
-    End With
+With dictHom
 
-    ' Map entreprises (Société = Dénomination en colonne 9)
-    For i = 2 To lastRowEnt
-        key = CanonicalId(wsEnt.Cells(i, 1).Value)
-        If Not dictEnt.Exists(key) Then
-            dictEnt.Add key, Array(wsEnt.Cells(i, 10).Value, wsEnt.Cells(i, 8).Value)  ' Société, SIREN
-        End If
-    Next i
-
-    ' Map dirigeants (sélection déterministe du dirigeant principal par ID) et ensemble complet par ID
-    ' Map dirigeants pour affichage (préférence Dénomination) et pour comparatif (Nom+Prénom)
-    Set dictDirPrimary = CreateObject("Scripting.Dictionary")
-    Set dictDirPrimaryKeyMap = CreateObject("Scripting.Dictionary")
-    ' (pas de dictionnaires séparés désormais)
-    Set dictAllDirByID = CreateObject("Scripting.Dictionary")
-    Set dirKeyToDisplay = CreateObject("Scripting.Dictionary")
-    For i = 2 To lastRowDir
-        key = CanonicalId(wsDir.Cells(i, 2).Value)
-        Dim denom As String
-        Dim displayForResume As String
-        denom = Trim$(CStr(wsDir.Cells(i, 10).Value)) ' Colonne J = Dénomination
-        If Len(denom) > 0 Then
-            displayForResume = denom
-        Else
-            displayForResume = NormalizeDisplayName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value) ' C (Nom) + E (Prénom 1)
-        End If
-        ' Sélection déterministe pour affichage (clé canoniquement minimal)
-        canonKey = CanonicalKeyFromDisplay(displayForResume)
-        If Len(canonKey) > 0 Then
-            If Not dictDirPrimary.Exists(key) Then
-                dictDirPrimary.Add key, displayForResume
-                dictDirPrimaryKeyMap.Add key, canonKey
-            ElseIf canonKey < dictDirPrimaryKeyMap(key) Then
-                dictDirPrimary(key) = displayForResume
-                dictDirPrimaryKeyMap(key) = canonKey
-            End If
-            ' Enregistrer pour TRACE et libellé d'affichage (clé canonique)
-            If Not dictAllDirByID.Exists(key) Then Set dictAllDirByID(key) = CreateObject("Scripting.Dictionary")
-            If Not dictAllDirByID(key).Exists(canonKey) Then dictAllDirByID(key).Add canonKey, displayForResume
-            If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, displayForResume
-        End If
-
-        ' Plus de map séparée pour comparatif: tout priorise Dénomination
-    Next i
-
-    ' Map garants et montants
-    For i = 2 To lastRowGar
-        key = CanonicalId(wsGar.Cells(i, 2).Value) ' Identifiant
-        Dim nomGarant As String
-        nomGarant = UCase(wsGar.Cells(i, 3).Value) ' Nom du garant à normaliser
+    ' ========================================================================
+    ' 1. GALIAN-SMABTP (90 variantes identifiées)
+    ' ========================================================================
+    ' Mots-clés principaux
+    .Add "GALIAN", "GALIAN-SMABTP"
+    .Add "SMABTP", "GALIAN-SMABTP"
+    .Add "SMA", "GALIAN-SMABTP"
     
-        ' Appliquer remplacement par recherche de mot-clé partiel
-        For Each cleHom In dictHom.Keys
-            If InStr(1, nomGarant, cleHom, vbTextCompare) > 0 Then
-                nomGarant = dictHom(cleHom)
-                Exit For
-            End If
-        Next cleHom
+    ' Variantes orthographiques
+    .Add "GAILIAN", "GALIAN-SMABTP"          ' Double-I
+    .Add "GALLIAN", "GALIAN-SMABTP"          ' Double-L
+    .Add "GALAIN", "GALIAN-SMABTP"           ' Typo
+    .Add "GALIN", "GALIAN-SMABTP"            ' Typo raccourci
     
-        ' Stocke unique (premier trouvé après remplacement)
-        If Not dictGar.Exists(key) Then
-            dictGar.Add key, nomGarant
-        End If
+    ' Variantes avec article
+    .Add "LE GALIAN", "GALIAN-SMABTP"
+    .Add "SA GALIAN", "GALIAN-SMABTP"
     
-        ' Initialiser le montant si nécessaire
-        If Not dictMont.Exists(key) Then dictMont.Add key, 0
+    ' Variantes de composants SMA
+    .Add "SMAB BTP", "GALIAN-SMABTP"
+    .Add "SMATP", "GALIAN-SMABTP"
+    .Add "SMATBP", "GALIAN-SMABTP"
+    .Add "SMBATP", "GALIAN-SMABTP"
+    .Add "SMBTP", "GALIAN-SMABTP"
+    .Add "SAMTP", "GALIAN-SMABTP"
     
-        ' Traitement du montant
-        montant = wsGar.Cells(i, 5).Value
-        If IsNumeric(montant) Then
-            dictMont(key) = dictMont(key) + CDbl(montant)
-        End If
-    Next i
+    ' Variantes dénomination
+    .Add "GARANTIE FINANCIERE", "GALIAN-SMABTP"  ' Dénomination Galian
+    
+    ' ========================================================================
+    ' 2. SOCAF (61 variantes identifiées)
+    ' ========================================================================
+    ' IMPORTANT: SOCAF a BEAUCOUP de formats d'abréviation différents!
+    
+    ' Formats d'abréviation (espacées, ponctuées, etc.)
+    .Add "SO.CA.F", "SOCAF"
+    .Add "SO CA F", "SOCAF"
+    .Add "SO CA.F", "SOCAF"
+    .Add "SO.CA. F", "SOCAF"       ' Ponctuation mixte
+    .Add "SO. CA. F", "SOCAF"      ' Espacements et points
+    .Add "SO CAF", "SOCAF"
+    .Add "SO.CAF", "SOCAF"
+    .Add "S O C A F", "SOCAF"       ' Espacé complet
+    .Add "S.O.C.A.F", "SOCAF"      ' Ponctué complet
+    .Add "S.O.CA.F", "SOCAF"
+    .Add "SOC AF", "SOCAF"
+    .Add "SOCAF", "SOCAF"          ' Format propre
+    
+    ' Variantes avec article
+    .Add "LA SOCAF", "SOCAF"
+    .Add "LA SOCIETE DE CAUTION", "SOCAF"
+    
+    ' Dénomination complète (à traiter en cas de contexte)
+    .Add "SOCIETE DE CAUTION MUTUELLE", "SOCAF"
+    
+    ' ========================================================================
+    ' 3. CEGC (68 variantes identifiées)
+    ' ========================================================================
+    ' IMPORTANT: CEGC = Compagnie Européenne de Garanties et Cautions
+    ' Attention aux typos et accents
+    
+    ' Format court principal
+    .Add "CEGC", "CEGC"
+    
+    ' Variantes du sigle court
+    .Add "C.E.G.C", "CEGC"
+    .Add "C E G C", "CEGC"
+    .Add "C.E.G.C.", "CEGC"
+    
+    ' Typos courants du sigle
+    .Add "CECG", "CEGC"            ' Lettres réorganisées
+    .Add "CGEC", "CEGC"            ' Lettres réorganisées
+    .Add "GEGC", "CEGC"            ' Typo G/C
+    .Add "CEGP", "CEGC"            ' Typo P/C
+    
+    ' Dénomination complète (variantes accents)
+    .Add "COMPAGNIE EUROPEENNE", "CEGC"
+    .Add "COMPAGNIE EUROPÉENNE", "CEGC"
+    .Add "COMPAGNIE EUROPEENNE DE GARANTIES", "CEGC"
+    .Add "COMPAGNIE EUROPÉENNE DE GARANTIES", "CEGC"
+    
+    ' Typos dans dénomination
+    .Add "COMPAGNIE EUROPEENNE DE GARENTIES", "CEGC"  ' GARENTIES au lieu de GARANTIES
+    .Add "COMPAGNIE EUROPEENNE DE GRANTIES", "CEGC"   ' GRANTIES
+    .Add "COMPAGNIE EUROPEENNE DE GARANTIE", "CEGC"   ' Singulier
+    .Add "COMPANIE EUROPEENNE", "CEGC"                ' COMPANIE au lieu de COMPAGNIE
+    .Add "COMPAGINIE", "CEGC"                         ' COMPAGINIE
+    
+    ' Format court alternatif
+    .Add "CIE EUROPEENNE", "CEGC"
+    
+    ' ========================================================================
+    ' 4. SEGAP (LLOYD'S-related) ? À NETTOYER !
+    ' ========================================================================
+    ' ??  IMPORTANT: Les données brutes contiennent 194 résultats avec BEAUCOUP
+    '     de faux positifs. Voici les VRAIS mappings:
+    
+    .Add "LLOYD'S", "SEGAP"
+    .Add "LLOYD", "SEGAP"
+    .Add "LLOYD S", "SEGAP"
+    .Add "LLOYDS", "SEGAP"
+    .Add "LLYOD'S", "SEGAP"        ' Typo
+    .Add "LOYD'S", "SEGAP"         ' Typo
+    .Add "SEGAP", "SEGAP"
+    .Add "COVERHOLDER AT LLOYD'S", "SEGAP"
+    
+    ' NOTE: NE PAS inclure ALLIANZ, MMA, GALIAN, CAMCA, etc.
+    '       (ils sont gérés séparément et avaient capturé "LL")
+    
+    ' ========================================================================
+    ' 5. GFC (13 variantes - très cohérent)
+    ' ========================================================================
+    .Add "GFC", "GFC"
+    .Add "GROUPEMENT FRANCAIS DE CAUTION", "GFC"
+    .Add "GROUPEMENT FRANCAIS", "GFC"  ' Raccourci
+    .Add "GROUPEMENT FRANCAIS CAUTION", "GFC"
+    
+    ' Typos mineurs
+    .Add "GROUPEMANT FRANCAIS", "GFC"
+    
+    ' ========================================================================
+    ' 6. ALLIANZ (108 variantes - bien documentées)
+    ' ========================================================================
+    .Add "ALLIANZ", "ALLIANZ"
+    
+    ' Typo sans double-L
+    .Add "ALIANZ", "ALLIANZ"
+    
+    ' Format IARD
+    .Add "IARD", "ALLIANZ"  ' ATTENTION: À ne pas utiliser seul!
+                            ' Utilisé ici avec contexte ALLIANZ
+    
+    ' Combinaison avec VERSPIEREN (combinaison assez courante)
+    .Add "ALLIANZ VERSPIEREN", "ALLIANZ"
+    .Add "VERSPIEREN ALLIANZ", "ALLIANZ"
+    
+    ' NOTE: VERSPIEREN seul ? Mapper à "Autres" (intermédiaire, pas assureur)
+    
+    ' ========================================================================
+    ' 7. AXA (27 variantes - très propre)
+    ' ========================================================================
+    .Add "AXA", "AXA"
+    .Add "AXA FRANCE", "AXA"
+    .Add "AXA IARD", "AXA"
+    .Add "AXAFRANCE", "AXA"  ' Sans espace
+    
+    ' ========================================================================
+    ' 8. MMA (48 variantes)
+    ' ========================================================================
+    .Add "MMA", "MMA"
+    .Add "MMA IARD", "MMA"
+    .Add "MMA ENTREPRISE", "MMA"
+    
+    ' Typo
+    .Add "MMAIARD", "MMA"
+    
+    ' NOTE: BDJ MMA ? Mapper plutôt à "Autres" (c'est un intermédiaire)
+    
+    ' ========================================================================
+    ' 9. CAMCA (15 variantes - très propre)
+    ' ========================================================================
+    .Add "CAMCA", "CAMCA"
+    .Add "CAISSE D'ASSURANCES MUTUELLES DU CREDIT AGRICOLE", "CAMCA"
+    .Add "CAISSE D ASSURANCES MUTUELLES", "CAMCA"  ' Appostrophe remplacée
+    
+    ' ========================================================================
+    ' 10. QBE (108 variantes)
+    ' ========================================================================
+    .Add "QBE", "QBE"
+    .Add "QBE EUROPE", "QBE"
+    .Add "QBE INSURANCE", "QBE"
+    
+    ' Partenariat avec +Simple (plateforme intégrée)
+    .Add "+SIMPLE", "QBE"
+    .Add "+Simple", "QBE"
+    
+    ' ========================================================================
+    ' 11. AUTRES GARANTS (353 non mappés, à considérer)
+    ' ========================================================================
+    ' Ces garants ne sont PAS mappés ci-dessus et tombent en "Autres"
+    ' Exemples importants non mappés:
+    '  - GROUPAMA (nombreuses variantes)
+    '  - AIG / AIG EUROPE (nombreuses variantes)
+    '  - ZURICH (nombreuses variantes)
+    '  - ATRADIUS
+    '  - LIBERTY MUTUAL INSURANCE EUROPE / LIBERTY SPECIALTY
+    '  - MARKEL INSURANCE
+    '  - Institutions bancaires (CIC, Crédit Agricole, Crédit Mutuel, etc.)
+    '  - ERGO
+    '  - Et ~300 autres
+    '
+    ' À DÉCIDER: Créer de nouveaux mappings pour les plus importants?
+    ' ACTION RECOMMANDÉE: Vérifier le VOLUME TOTAL DE GARANTIES pour chaque
+    '                     non-mappé. Si <<< insignifiant ? "Autres" OK
+    '                     Si >> important ? Créer mappings séparés
+    
+End With
 
-    ' Map assureurs (ne garder que le premier)
-    For i = 2 To lastRowAss
-        key = CanonicalId(wsAss.Cells(i, 2).Value)
-        valeur = wsAss.Cells(i, 3).Value
-        If Not dictAss.Exists(key) Then
-            dictAss.Add key, valeur
-        End If
-        ' Sinon on ignore les suivants
-    Next i
 
-    ' Étape 2 : Ouvrir explorateur pour sélectionner le fichier portefeuille
-    FileNamePortefeuille = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le fichier portefeuille client")
-    If FileNamePortefeuille = "False" Then
-        MsgBox "Aucun fichier portefeuille sélectionné. N° sociétaire restera vide."
-    Else
-        Set wbPortefeuille = workbooks.Open(FileNamePortefeuille)
-        Set wsBaseCA = wbPortefeuille.Sheets("Base CA")
-        lastRowBaseCA = wsBaseCA.Cells(wsBaseCA.Rows.Count, 1).End(xlUp).Row
+' Map entreprises (Société = Dénomination en colonne 9)
+For i = 2 To lastRowEnt
+key = CanonicalId(wsEnt.Cells(i, 1).Value)
+If Not dictEnt.Exists(key) Then
+dictEnt.Add key, Array(wsEnt.Cells(i, 10).Value, wsEnt.Cells(i, 8).Value) ' Société, SIREN
+End If
+Next i
 
-        ' Trouver colonnes SOC et SIREN
-        colSOC = 0: colSIREN = 0
-        For i = 1 To wsBaseCA.Cells(1, Columns.Count).End(xlToLeft).Column
-            If UCase(Trim(wsBaseCA.Cells(1, i).Value)) = "SOC" Then colSOC = i
-            If UCase(Trim(wsBaseCA.Cells(1, i).Value)) = "SIREN" Then colSIREN = i
-        Next i
+' Map dirigeants (sélection déterministe du dirigeant principal par ID) et ensemble complet par ID
+' Map dirigeants pour affichage (préférence Dénomination) et pour comparatif (Nom+Prénom)
+Set dictDirPrimary = CreateObject("Scripting.Dictionary")
+Set dictDirPrimaryKeyMap = CreateObject("Scripting.Dictionary")
+' (pas de dictionnaires séparés désormais)
+Set dictAllDirByID = CreateObject("Scripting.Dictionary")
+Set dirKeyToDisplay = CreateObject("Scripting.Dictionary")
+For i = 2 To lastRowDir
+key = CanonicalId(wsDir.Cells(i, 2).Value)
+Dim denom As String
+Dim displayForResume As String
+denom = Trim$(CStr(wsDir.Cells(i, 10).Value)) ' Colonne J = Dénomination
+If Len(denom) > 0 Then
+displayForResume = denom
+Else
+displayForResume = NormalizeDisplayName(wsDir.Cells(i, 3).Value, wsDir.Cells(i, 5).Value) ' C (Nom) + E (Prénom 1)
+End If
+' Sélection déterministe pour affichage (clé canoniquement minimal)
+canonKey = CanonicalKeyFromDisplay(displayForResume)
+If Len(canonKey) > 0 Then
+If Not dictDirPrimary.Exists(key) Then
+dictDirPrimary.Add key, displayForResume
+dictDirPrimaryKeyMap.Add key, canonKey
+ElseIf canonKey < dictDirPrimaryKeyMap(key) Then
+dictDirPrimary(key) = displayForResume
+dictDirPrimaryKeyMap(key) = canonKey
+End If
+' Enregistrer pour TRACE et libellé d'affichage (clé canonique)
+If Not dictAllDirByID.Exists(key) Then Set dictAllDirByID(key) = CreateObject("Scripting.Dictionary")
+If Not dictAllDirByID(key).Exists(canonKey) Then dictAllDirByID(key).Add canonKey, displayForResume
+If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, displayForResume
+End If
 
-        If colSOC = 0 Or colSIREN = 0 Then
-            MsgBox "Colonnes 'SOC' ou 'SIREN' non trouvées dans 'Base CA'. N° sociétaire restera vide."
-        Else
-            Set dictSoc = CreateObject("Scripting.Dictionary")
-            For i = 2 To lastRowBaseCA
-                key = CanonicalId(wsBaseCA.Cells(i, colSIREN).Value)
-                If Not dictSoc.Exists(key) Then
-                    dictSoc.Add key, wsBaseCA.Cells(i, colSOC).Value
-                End If
-            Next i
-        End If
-        wbPortefeuille.Close SaveChanges:=False
-    End If
+' Plus de map séparée pour comparatif: tout priorise Dénomination
+Next i
 
-    ' Créer et ouvrir un nouveau classeur pour le résumé
-    Set wbTarget = workbooks.Add
-    Set wsTarget = wbTarget.Sheets(1)
-    wsTarget.Name = "ResumeCCI"
-    wsTarget.Cells(1, 1).Resize(1, 9).Value = Array("ID", "N° sociétaire", "Société", "SIREN", "Dirigeant", "Garant", "Montant GF", "Assureur", "Nb garants (dirigeant)")
+' Map garants et montants
+For i = 2 To lastRowGar
+key = CanonicalId(wsGar.Cells(i, 2).Value) ' Identifiant
+Dim nomGarant As String
+Dim matched As Boolean ' Nouveau : drapeau pour vérifier si un match a eu lieu
+matched = False
+nomGarant = UCase(wsGar.Cells(i, 3).Value) ' Nom du garant à normaliser
 
-    ' Remplir les données (écriture en bloc via tableau pour performance)
-    Dim numRows As Long
-    Dim dataOut() As Variant
-    Dim idx As Long
-    Dim sirenKey As String
+' Appliquer remplacement par recherche de mot-clé partiel
+For Each cleHom In dictHom.Keys
+If InStr(1, nomGarant, cleHom, vbTextCompare) > 0 Then
+nomGarant = dictHom(cleHom)
+matched = True ' Marquer comme matché
+Exit For
+End If
+Next cleHom
 
-    numRows = dictEnt.Count
-    ' Pré-calculer le nombre de garants par dirigeant (clé canonique)
-    Dim dirToGarantSet As Object, dirToGarantCount As Object
-    Set dirToGarantSet = CreateObject("Scripting.Dictionary")
+' Si aucun match, remplacer par "Autres"
+If Not matched Then
+nomGarant = "Autres"
+End If
+
+' Stocke unique (premier trouvé après remplacement)
+If Not dictGar.Exists(key) Then
+dictGar.Add key, nomGarant
+End If
+
+' Initialiser le montant si nécessaire
+If Not dictMont.Exists(key) Then dictMont.Add key, 0
+
+' Traitement du montant
+montant = wsGar.Cells(i, 5).Value
+If IsNumeric(montant) Then
+dictMont(key) = dictMont(key) + CDbl(montant)
+End If
+Next i
+
+' Map assureurs (ne garder que le premier)
+For i = 2 To lastRowAss
+key = CanonicalId(wsAss.Cells(i, 2).Value)
+valeur = wsAss.Cells(i, 3).Value
+If Not dictAss.Exists(key) Then
+dictAss.Add key, valeur
+End If
+' Sinon on ignore les suivants
+Next i
+
+' Étape 2 : Ouvrir explorateur pour sélectionner le fichier portefeuille
+FileNamePortefeuille = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez le fichier portefeuille client")
+If FileNamePortefeuille = "False" Then
+MsgBox "Aucun fichier portefeuille sélectionné. N° sociétaire restera vide."
+Else
+Set wbPortefeuille = workbooks.Open(FileNamePortefeuille)
+Set wsBaseCA = wbPortefeuille.Sheets("Base CA")
+lastRowBaseCA = wsBaseCA.Cells(wsBaseCA.Rows.Count, 1).End(xlUp).row
+
+' Trouver colonnes SOC et SIREN
+colSOC = 0: colSIREN = 0
+For i = 1 To wsBaseCA.Cells(1, Columns.Count).End(xlToLeft).Column
+If UCase(Trim(wsBaseCA.Cells(1, i).Value)) = "SOC" Then colSOC = i
+If UCase(Trim(wsBaseCA.Cells(1, i).Value)) = "SIREN" Then colSIREN = i
+Next i
+
+If colSOC = 0 Or colSIREN = 0 Then
+MsgBox "Colonnes 'SOC' ou 'SIREN' non trouvées dans 'Base CA'. N° sociétaire restera vide."
+Else
+Set dictSoc = CreateObject("Scripting.Dictionary")
+For i = 2 To lastRowBaseCA
+key = CanonicalId(wsBaseCA.Cells(i, colSIREN).Value)
+If Not dictSoc.Exists(key) Then
+dictSoc.Add key, wsBaseCA.Cells(i, colSOC).Value
+End If
+Next i
+End If
+wbPortefeuille.Close SaveChanges:=False
+End If
+
+' Créer et ouvrir un nouveau classeur pour le résumé
+Set wbTarget = workbooks.Add
+Set wsTarget = wbTarget.Sheets(1)
+wsTarget.Name = "ResumeCCI"
+wsTarget.Cells(1, 1).Resize(1, 9).Value = Array("ID", "N° sociétaire", "Société", "SIREN", "Dirigeant", "Garant", "Montant GF", "Assureur", "Nb garants (dirigeant)")
+
+' Remplir les données (écriture en bloc via tableau pour performance)
+Dim numRows As Long
+Dim dataOut() As Variant
+Dim idx As Long
+Dim sirenKey As String
+
+numRows = dictEnt.Count
+' Pré-calculer le nombre de garants par dirigeant (clé canonique)
+Dim dirToGarantSet As Object, dirToGarantCount As Object
+Set dirToGarantSet = CreateObject("Scripting.Dictionary")
+For Each key In dictEnt.Keys
+' Utiliser la clé canonique priorisant Dénomination
+If dictDirPrimaryKeyMap.Exists(key) Then
+dirCanon = CStr(dictDirPrimaryKeyMap(key))
+If Not dirToGarantSet.Exists(dirCanon) Then Set dirToGarantSet(dirCanon) = CreateObject("Scripting.Dictionary")
+If dictGar.Exists(key) Then
+garantName = CStr(dictGar(key))
+If Not dirToGarantSet(dirCanon).Exists(garantName) Then dirToGarantSet(dirCanon).Add garantName, True
+End If
+End If
+Next key
+Set dirToGarantCount = CreateObject("Scripting.Dictionary")
+For Each dirCanon In dirToGarantSet.Keys
+dirToGarantCount.Add dirCanon, dirToGarantSet(dirCanon).Count
+Next dirCanon
+If numRows > 0 Then
+ReDim dataOut(1 To numRows, 1 To 9)
+idx = 1
+For Each key In dictEnt.Keys
+dataOut(idx, 1) = key
+dataOut(idx, 4) = dictEnt(key)(1) ' SIREN
+sirenKey = CanonicalId(dataOut(idx, 4))
+If Not dictSoc Is Nothing And dictSoc.Exists(sirenKey) Then
+dataOut(idx, 2) = dictSoc(sirenKey) ' N° sociétaire
+Else
+dataOut(idx, 2) = "NA"
+End If
+dataOut(idx, 3) = dictEnt(key)(0) ' Société
+If dictDirPrimary.Exists(key) Then dataOut(idx, 5) = dictDirPrimary(key)
+If dictGar.Exists(key) Then dataOut(idx, 6) = dictGar(key)
+If dictMont.Exists(key) Then dataOut(idx, 7) = dictMont(key)
+If dictAss.Exists(key) Then dataOut(idx, 8) = dictAss(key)
+' Nb garants pour ce dirigeant (clé canonique priorisant Dénomination)
+If dictDirPrimaryKeyMap.Exists(key) Then
+dirCanon = CStr(dictDirPrimaryKeyMap(key))
+If dirToGarantCount.Exists(dirCanon) Then
+dataOut(idx, 9) = dirToGarantCount(dirCanon)
+Else
+dataOut(idx, 9) = 0
+End If
+Else
+dataOut(idx, 9) = 0
+End If
+idx = idx + 1
+Next
+wsTarget.Range("A2").Resize(numRows, 9).Value = dataOut
+End If
+
+' Mise en forme de tableau (éviter CurrentRegion sur grands fichiers)
+Dim tblRange As Range
+Set tblRange = wsTarget.Range("A1").Resize(numRows + 1, 9)
+wsTarget.ListObjects.Add(xlSrcRange, tblRange, , xlYes).Name = "TableauResume"
+
+' Centrer colonnes B (N° sociétaire) et D (SIREN)
+wsTarget.Columns("B:B").HorizontalAlignment = xlCenter
+wsTarget.Columns("D:D").HorizontalAlignment = xlCenter
+
+' Format comptabilité pour colonne G (Montant GF)
+wsTarget.Columns("G:G").NumberFormat = "#,##0, ""K€"""
+
+wsTarget.Columns.AutoFit
+
+' ==============================
+' Tableau croisé dynamique Dirigeant x Garant (VBA-only, sans PQ)
+' ==============================
+Dim wsPivot As Worksheet
+Dim pt As pivotTable
+Dim pc As pivotCache
+Dim destCell As Range
+Dim srcRange As Range
+Dim wsFiltered As Worksheet
+
+' Créer feuille Pivot
+On Error Resume Next
+Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
+On Error GoTo 0
+If wsPivot Is Nothing Then
+Set wsPivot = wbTarget.Sheets.Add(After:=wsTarget)
+wsPivot.Name = "PivotDirigeantGarant"
+Else
+wsPivot.Cells.Clear
+End If
+
+' Ajoute col temp pour total sociétés par dirigeant (VBA rapide)
+Dim srcLo As ListObject
+Set srcLo = wsTarget.ListObjects("TableauResume")
+srcLo.ListColumns.Add.Name = "TotalSocietesTemp"
+Dim dictTotalSoc As Object
+Set dictTotalSoc = CreateObject("Scripting.Dictionary")
+For i = 2 To srcLo.Range.Rows.Count
+Dim dirTemp As String
+dirTemp = CStr(srcLo.Range.Cells(i, 5).Value)
+If Len(dirTemp) > 0 Then
+If Not dictTotalSoc.Exists(dirTemp) Then dictTotalSoc.Add dirTemp, 0
+dictTotalSoc(dirTemp) = dictTotalSoc(dirTemp) + 1
+End If
+Next i
+For i = 2 To srcLo.Range.Rows.Count
+dirTemp = CStr(srcLo.Range.Cells(i, 5).Value)
+srcLo.Range.Cells(i, srcLo.ListColumns("TotalSocietesTemp").Index).Value = dictTotalSoc(dirTemp)
+Next i
+
+' Filtre AutoFilter sur col temp >1
+Dim tempColIndex As Long
+tempColIndex = srcLo.ListColumns("TotalSocietesTemp").Index
+srcLo.Range.AutoFilter Field:=tempColIndex, Criteria1:=">1"
+
+' Copie données visibles dans nouvelle sheet (évite 1004 sur large range)
+Set wsFiltered = wbTarget.Sheets.Add(After:=wsPivot)
+wsFiltered.Name = "FilteredData"
+srcLo.Range.SpecialCells(xlCellTypeVisible).Copy wsFiltered.Range("A1")
+wsFiltered.Columns.AutoFit
+
+' Source PT : range de la sheet filtrée
+Set srcRange = wsFiltered.Range("A1").CurrentRegion
+
+Set destCell = wsPivot.Range("A3")
+
+' Créer cache et PT
+Set pc = wbTarget.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=srcRange)
+pc.MissingItemsLimit = xlMissingItemsNone
+
+On Error Resume Next
+Set pt = wsPivot.PivotTables("TCD_DirGar")
+On Error GoTo 0
+If pt Is Nothing Then
+Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
+Else
+pt.TableRange2.Clear
+Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
+End If
+
+' Construire PT (drill-down natif activé)
+pt.ManualUpdate = True
+With pt
+.ClearAllFilters
+On Error Resume Next
+Dim pfDir As PivotField, pfGar As PivotField, pfID As PivotField
+Set pfDir = .PivotFields("Dirigeant")
+Set pfGar = .PivotFields("Garant")
+Set pfID = .PivotFields("ID")
+If Not pfDir Is Nothing Then pfDir.Orientation = xlRowField
+If Not pfGar Is Nothing Then pfGar.Orientation = xlColumnField
+If Not pfID Is Nothing Then .AddDataField pfID, "Nb occurrences", xlCount
+On Error GoTo 0
+.RowGrand = True
+.ColumnGrand = True
+.ShowTableStyleRowStripes = True
+End With
+pt.ManualUpdate = False
+pt.RefreshTable
+
+' Highlight vert si nb garants >1 (plusieurs sociétés)
+Dim dataBody As Range
+Set dataBody = pt.DataBodyRange
+If Not dataBody Is Nothing Then
+Dim row As Range
+For Each row In dataBody.Rows
+Dim col As Long
+For col = 1 To row.Columns.Count
+If row.Cells(1, col).Value = "Nb garants (dirigeant)" Then
+Dim nbGarValue As Variant
+nbGarValue = row.Cells(1, col).Offset(0, 0).Value ' Valeur dans ligne
+If IsNumeric(nbGarValue) And CDbl(nbGarValue) > 1 Then
+row.Interior.Color = RGB(198, 239, 206) ' Vert léger
+row.Font.Bold = True
+End If
+Exit For
+End If
+Next col
+Next row
+End If
+
+' Nettoie col temp et filtre
+srcLo.ListColumns("TotalSocietesTemp").Delete
+srcLo.Range.AutoFilter ' Retire filtre
+
+' Supprime FilteredData après PT
+Application.DisplayAlerts = False
+wsFiltered.Delete
+Application.DisplayAlerts = True
+
+' Format
+wsPivot.Columns("A:A").ColumnWidth = 5
+On Error Resume Next
+pt.TableStyle2 = "PivotStyleLight16"
+On Error GoTo 0
+If Not pt.DataBodyRange Is Nothing Then pt.DataBodyRange.NumberFormat = "0"
+wsPivot.Columns("B:Z").ColumnWidth = 12
+
+
+' ==============================
+' Construire la feuille ComparatifDirigeants
+' ==============================
+
+' Agrégats actuels par dirigeant (comptes, montants, garant principal) en prenant uniquement le dirigeant principal
+Set dictDirSocCount = CreateObject("Scripting.Dictionary")
+Set dictDirTotalGF = CreateObject("Scripting.Dictionary")
+Set dictDirGarantFreq = CreateObject("Scripting.Dictionary") ' canonDir -> (Garant -> Count)
+
+For Each key In dictEnt.Keys
+If dictDirPrimaryKeyMap.Exists(key) Then
+dirCanon = CStr(dictDirPrimaryKeyMap(key))
+dirDisplay = CStr(dictDirPrimary(key))
+If Not dirKeyToDisplay.Exists(dirCanon) Then dirKeyToDisplay.Add dirCanon, dirDisplay
+
+If Not dictDirSocCount.Exists(dirCanon) Then dictDirSocCount.Add dirCanon, 0
+dictDirSocCount(dirCanon) = dictDirSocCount(dirCanon) + 1
+
+If Not dictDirTotalGF.Exists(dirCanon) Then dictDirTotalGF.Add dirCanon, 0#
+If dictMont.Exists(key) Then
+If IsNumeric(dictMont(key)) Then dictDirTotalGF(dirCanon) = CDbl(dictDirTotalGF(dirCanon)) + CDbl(dictMont(key))
+End If
+
+If Not dictDirGarantFreq.Exists(dirCanon) Then Set dictDirGarantFreq(dirCanon) = CreateObject("Scripting.Dictionary")
+If dictGar.Exists(key) Then
+garantName = CStr(dictGar(key))
+If Not dictDirGarantFreq(dirCanon).Exists(garantName) Then dictDirGarantFreq(dirCanon).Add garantName, 0
+dictDirGarantFreq(dirCanon)(garantName) = dictDirGarantFreq(dirCanon)(garantName) + 1
+End If
+End If
+Next key
+
+' Agrégats anciens (optionnels) par dirigeant
+hasOld = False
+FileNameOldCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez l'ancien fichier CCI (optionnel)")
+If Not (FileNameOldCCI = "False") Then
+On Error Resume Next
+Set wbOld = workbooks.Open(FileNameOldCCI)
+On Error GoTo 0
+If Not wbOld Is Nothing Then
+hasOld = True
+
+' Feuilles source anciennes
+Set wsEntOld = wbOld.Sheets("Entreprise")
+Set wsDirOld = wbOld.Sheets("Dirigeant")
+Set wsGarOld = wbOld.Sheets("Garant")
+Set wsAssOld = wbOld.Sheets("Assureur")
+
+lastRowEntOld = wsEntOld.Cells(wsEntOld.Rows.Count, 1).End(xlUp).row
+lastRowDirOld = wsDirOld.Cells(wsDirOld.Rows.Count, 1).End(xlUp).row
+lastRowGarOld = wsGarOld.Cells(wsGarOld.Rows.Count, 1).End(xlUp).row
+lastRowAssOld = wsAssOld.Cells(wsAssOld.Rows.Count, 1).End(xlUp).row
+
+' Dictionnaires anciens
+Set dictEntOld = CreateObject("Scripting.Dictionary")
+Set dictDirOld = CreateObject("Scripting.Dictionary")
+Set dictGarOld = CreateObject("Scripting.Dictionary")
+Set dictMontOld = CreateObject("Scripting.Dictionary")
+
+' Map entreprises anciennes
+For i = 2 To lastRowEntOld
+key = CanonicalId(wsEntOld.Cells(i, 1).Value)
+If Not dictEntOld.Exists(key) Then
+dictEntOld.Add key, Array(wsEntOld.Cells(i, 10).Value, wsEntOld.Cells(i, 8).Value) ' Société, SIREN
+End If
+Next i
+
+' Map dirigeants anciens (tous par ID) – Dénomination prioritaire
+Set dictOldAllDirByID = CreateObject("Scripting.Dictionary")
+For i = 2 To lastRowDirOld
+key = CanonicalId(wsDirOld.Cells(i, 2).Value)
+Dim oldDenom As String
+Dim oldDisplay As String
+oldDenom = Trim$(CStr(wsDirOld.Cells(i, 10).Value))
+If Len(oldDenom) > 0 Then
+oldDisplay = oldDenom
+Else
+oldDisplay = NormalizeDisplayName(wsDirOld.Cells(i, 3).Value, wsDirOld.Cells(i, 5).Value)
+End If
+canonKey = CanonicalKeyFromDisplay(oldDisplay)
+If Len(canonKey) > 0 Then
+If Not dictOldAllDirByID.Exists(key) Then Set dictOldAllDirByID(key) = CreateObject("Scripting.Dictionary")
+If Not dictOldAllDirByID(key).Exists(canonKey) Then dictOldAllDirByID(key).Add canonKey, oldDisplay
+If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, oldDisplay
+End If
+Next i
+
+' Map garants et montants anciens (avec mêmes homonymes)
+For i = 2 To lastRowGarOld
+key = CanonicalId(wsGarOld.Cells(i, 2).Value)
+Dim oldGarant As String
+oldGarant = UCase(wsGarOld.Cells(i, 3).Value)
+
+For Each cleHom In dictHom.Keys
+If InStr(1, oldGarant, cleHom, vbTextCompare) > 0 Then
+oldGarant = dictHom(cleHom)
+Exit For
+End If
+Next cleHom
+
+If Not dictGarOld.Exists(key) Then dictGarOld.Add key, oldGarant
+If Not dictMontOld.Exists(key) Then dictMontOld.Add key, 0
+
+montant = wsGarOld.Cells(i, 5).Value
+If IsNumeric(montant) Then dictMontOld(key) = dictMontOld(key) + CDbl(montant)
+Next i
+
+' (Assureurs anciens non nécessaires pour ce comparatif)
+
+' Sélection du dirigeant principal ancien par ID (même règle déterministe)
+Set dictOldDirPrimary = CreateObject("Scripting.Dictionary")
+Set dictOldDirPrimaryKeyMap = CreateObject("Scripting.Dictionary")
+Dim idKey As Variant, minCanon As String, disp As String
+For Each idKey In dictOldAllDirByID.Keys
+minCanon = ""
+For Each canonKey In dictOldAllDirByID(idKey).Keys
+If minCanon = "" Or canonKey < minCanon Then
+minCanon = canonKey
+End If
+Next canonKey
+If Len(minCanon) > 0 Then
+disp = dictOldAllDirByID(idKey)(minCanon)
+dictOldDirPrimary.Add idKey, disp
+dictOldDirPrimaryKeyMap.Add idKey, minCanon
+If Not dirKeyToDisplay.Exists(minCanon) Then dirKeyToDisplay.Add minCanon, disp
+End If
+Next idKey
+
+' Agrégats anciens par dirigeant (uniquement dirigeant principal)
+Set dictOldDirSocCount = CreateObject("Scripting.Dictionary")
+Set dictOldDirTotalGF = CreateObject("Scripting.Dictionary")
+
+For Each key In dictEntOld.Keys
+' Utiliser Nom+Prénom ancien (dictOldDirPrimaryKeyMap déjà basé sur Nom+Prénom)
+If dictOldDirPrimaryKeyMap.Exists(key) Then
+dirCanon = CStr(dictOldDirPrimaryKeyMap(key))
+If Not dictOldDirSocCount.Exists(dirCanon) Then dictOldDirSocCount.Add dirCanon, 0
+dictOldDirSocCount(dirCanon) = dictOldDirSocCount(dirCanon) + 1
+
+If Not dictOldDirTotalGF.Exists(dirCanon) Then dictOldDirTotalGF.Add dirCanon, 0#
+If dictMontOld.Exists(key) Then
+If IsNumeric(dictMontOld(key)) Then dictOldDirTotalGF(dirCanon) = CDbl(dictOldDirTotalGF(dirCanon)) + CDbl(dictMontOld(key))
+End If
+End If
+Next key
+
+wbOld.Close SaveChanges:=False
+End If
+End If
+
+    ' Nouveau dictionnaire: Dirigeant ? Has GALIAN-SMABTP?
+    Dim dictDirHasGalian As Object
+    Set dictDirHasGalian = CreateObject("Scripting.Dictionary")
+    
+    ' Boucler sur toutes les entreprises pour détecter GALIAN
     For Each key In dictEnt.Keys
-        ' Utiliser la clé canonique priorisant Dénomination
         If dictDirPrimaryKeyMap.Exists(key) Then
             dirCanon = CStr(dictDirPrimaryKeyMap(key))
-            If Not dirToGarantSet.Exists(dirCanon) Then Set dirToGarantSet(dirCanon) = CreateObject("Scripting.Dictionary")
+            
+            ' Vérifier si ce dirigeant a au moins 1 entreprise avec GALIAN
+            If Not dictDirHasGalian.Exists(dirCanon) Then
+                dictDirHasGalian.Add dirCanon, False
+            End If
+            
+            ' Si ce garant = GALIAN-SMABTP, marquer le dirigeant
             If dictGar.Exists(key) Then
-                garantName = CStr(dictGar(key))
-                If Not dirToGarantSet(dirCanon).Exists(garantName) Then dirToGarantSet(dirCanon).Add garantName, True
+                If CStr(dictGar(key)) = "GALIAN-SMABTP" Then
+                    dictDirHasGalian(dirCanon) = True
+                End If
             End If
         End If
     Next key
-    Set dirToGarantCount = CreateObject("Scripting.Dictionary")
-    For Each dirCanon In dirToGarantSet.Keys
-        dirToGarantCount.Add dirCanon, dirToGarantSet(dirCanon).Count
-    Next dirCanon
-    If numRows > 0 Then
-        ReDim dataOut(1 To numRows, 1 To 9)
-        idx = 1
-        For Each key In dictEnt.Keys
-            dataOut(idx, 1) = key
-            dataOut(idx, 4) = dictEnt(key)(1)  ' SIREN
-            sirenKey = CanonicalId(dataOut(idx, 4))
-            If Not dictSoc Is Nothing And dictSoc.Exists(sirenKey) Then
-                dataOut(idx, 2) = dictSoc(sirenKey)  ' N° sociétaire
-            Else
-                dataOut(idx, 2) = "NA"
-            End If
-            dataOut(idx, 3) = dictEnt(key)(0)  ' Société
-            If dictDirPrimary.Exists(key) Then dataOut(idx, 5) = dictDirPrimary(key)
-            If dictGar.Exists(key) Then dataOut(idx, 6) = dictGar(key)
-            If dictMont.Exists(key) Then dataOut(idx, 7) = dictMont(key)
-            If dictAss.Exists(key) Then dataOut(idx, 8) = dictAss(key)
-            ' Nb garants pour ce dirigeant (clé canonique priorisant Dénomination)
-            If dictDirPrimaryKeyMap.Exists(key) Then
-                dirCanon = CStr(dictDirPrimaryKeyMap(key))
-                If dirToGarantCount.Exists(dirCanon) Then
-                    dataOut(idx, 9) = dirToGarantCount(dirCanon)
-                Else
-                    dataOut(idx, 9) = 0
-                End If
-            Else
-                dataOut(idx, 9) = 0
-            End If
-            idx = idx + 1
-        Next
-        wsTarget.Range("A2").Resize(numRows, 9).Value = dataOut
-    End If
 
-    ' Mise en forme de tableau (éviter CurrentRegion sur grands fichiers)
-    Dim tblRange As Range
-    Set tblRange = wsTarget.Range("A1").Resize(numRows + 1, 9)
-    wsTarget.ListObjects.Add(xlSrcRange, tblRange, , xlYes).Name = "TableauResume"
+' Construire l'ensemble des dirigeants (union actuel + ancien si présent)
+Set allDirNames = CreateObject("Scripting.Dictionary")
+If Not dictDirSocCount Is Nothing Then
+For Each key In dictDirSocCount.Keys
+If Not allDirNames.Exists(key) Then allDirNames.Add key, True
+Next key
+End If
+If hasOld Then
+If Not dictOldDirSocCount Is Nothing Then
+For Each key In dictOldDirSocCount.Keys
+If Not allDirNames.Exists(key) Then allDirNames.Add key, True
+Next key
+End If
+End If
 
-    ' Centrer colonnes B (N° sociétaire) et D (SIREN)
-    wsTarget.Columns("B:B").HorizontalAlignment = xlCenter
-    wsTarget.Columns("D:D").HorizontalAlignment = xlCenter
+' Créer la feuille de comparatif
+Set wsComp = wbTarget.Sheets.Add(After:=wsTarget)
+wsComp.Name = "ComparatifDirigeants"
+wsComp.Cells(1, 1).Resize(1, 7).Value = Array("Dirigeant", "Total sociétés", "Garant GS", "Mouvement société", "Montant total GF", "Mouvement GF", "Plusieurs garants")
 
-    ' Format comptabilité pour colonne G (Montant GF)
-    wsTarget.Columns("G:G").NumberFormat = "#,##0, ""K€"""
+' Remplir les données ligne à ligne
+rowIndex = 2
+For Each key In allDirNames.Keys
+dirName = CStr(key)
 
-    wsTarget.Columns.AutoFit
+' Total sociétés actuel
+Dim currSoc As Long
+Dim oldSoc As Long
+Dim currGF As Double
+Dim oldGF As Double
+Dim mouvementSoc As Long
+Dim mouvementGF As Double
 
-    ' ==============================
-    ' Tableau croisé dynamique Dirigeant x Garant
-    ' ==============================
-    Dim wsPivot As Worksheet
-    Dim pc As PivotCache
-    Dim pt As PivotTable
-    Dim srcRange As Range
-    Dim destCell As Range
+If dictDirSocCount.Exists(dirName) Then currSoc = CLng(dictDirSocCount(dirName)) Else currSoc = 0
+If hasOld And Not dictOldDirSocCount Is Nothing Then
+If dictOldDirSocCount.Exists(dirName) Then oldSoc = CLng(dictOldDirSocCount(dirName)) Else oldSoc = 0
+Else
+oldSoc = 0
+End If
+mouvementSoc = currSoc - oldSoc
 
-    ' Source du TCD: utiliser directement la table du résumé
-    Set srcRange = wsTarget.ListObjects("TableauResume").Range
-
-    On Error Resume Next
-    Set wsPivot = wbTarget.Sheets("PivotDirigeantGarant")
-    On Error GoTo 0
-    If wsPivot Is Nothing Then
-        Set wsPivot = wbTarget.Sheets.Add(After:=wsTarget)
-        wsPivot.Name = "PivotDirigeantGarant"
-    Else
-        wsPivot.Cells.Clear
-    End If
-
-    Set destCell = wsPivot.Range("A3")
-
-    ' Créer le cache sans rafraîchissements répétés
-    Set pc = wbTarget.PivotCaches.Create(SourceType:=xlDatabase, SourceData:=srcRange)
-    pc.MissingItemsLimit = xlMissingItemsNone ' éviter la rétention d'anciens éléments
-
-    On Error Resume Next
-    Set pt = wsPivot.PivotTables("TCD_DirGar")
-    On Error GoTo 0
-    If pt Is Nothing Then
-        Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
-    Else
-        pt.TableRange2.Clear
-        Set pt = pc.CreatePivotTable(TableDestination:=destCell, TableName:="TCD_DirGar")
-    End If
-
-    ' Construire le TCD sans rafraîchir à chaque étape
-    pt.ManualUpdate = True
-    With pt
-        .ClearAllFilters
-        On Error Resume Next
-        .PivotFields("Dirigeant").Orientation = xlRowField
-        .PivotFields("Garant").Orientation = xlColumnField
-        On Error GoTo 0
-        .AddDataField .PivotFields("ID"), "Nb sociétés", xlCount
-        ' Afficher le nombre de garants en zone Valeurs (utiliser Max pour éviter les doublons)
-        .AddDataField .PivotFields("Nb garants (dirigeant)"), "Nb garants", xlMax
-        .RowGrand = True
-        .ColumnGrand = True
-        .ShowTableStyleRowStripes = True
-    End With
-    pt.ManualUpdate = False
-    pt.RefreshTable
-
-    On Error Resume Next
-    pt.TableStyle2 = "PivotStyleLight16"
-    On Error GoTo 0
-
-    If Not pt.DataBodyRange Is Nothing Then pt.DataBodyRange.NumberFormat = "0"
-    wsPivot.Columns("A:Z").ColumnWidth = 12
-
-    ' ==============================
-    ' Construire la feuille ComparatifDirigeants
-    ' ==============================
-
-    ' Agrégats actuels par dirigeant (comptes, montants, garant principal) en prenant uniquement le dirigeant principal
-    Set dictDirSocCount = CreateObject("Scripting.Dictionary")
-    Set dictDirTotalGF = CreateObject("Scripting.Dictionary")
-    Set dictDirGarantFreq = CreateObject("Scripting.Dictionary") ' canonDir -> (Garant -> Count)
-
-    For Each key In dictEnt.Keys
-        If dictDirPrimaryKeyMap.Exists(key) Then
-            dirCanon = CStr(dictDirPrimaryKeyMap(key))
-            dirDisplay = CStr(dictDirPrimary(key))
-            If Not dirKeyToDisplay.Exists(dirCanon) Then dirKeyToDisplay.Add dirCanon, dirDisplay
-
-            If Not dictDirSocCount.Exists(dirCanon) Then dictDirSocCount.Add dirCanon, 0
-            dictDirSocCount(dirCanon) = dictDirSocCount(dirCanon) + 1
-
-            If Not dictDirTotalGF.Exists(dirCanon) Then dictDirTotalGF.Add dirCanon, 0#
-            If dictMont.Exists(key) Then
-                If IsNumeric(dictMont(key)) Then dictDirTotalGF(dirCanon) = CDbl(dictDirTotalGF(dirCanon)) + CDbl(dictMont(key))
-            End If
-
-            If Not dictDirGarantFreq.Exists(dirCanon) Then Set dictDirGarantFreq(dirCanon) = CreateObject("Scripting.Dictionary")
-            If dictGar.Exists(key) Then
-                garantName = CStr(dictGar(key))
-                If Not dictDirGarantFreq(dirCanon).Exists(garantName) Then dictDirGarantFreq(dirCanon).Add garantName, 0
-                dictDirGarantFreq(dirCanon)(garantName) = dictDirGarantFreq(dirCanon)(garantName) + 1
-            End If
-        End If
-    Next key
-
-    ' Agrégats anciens (optionnels) par dirigeant
-    hasOld = False
-    FileNameOldCCI = Application.GetOpenFilename("Fichiers Excel (*.xlsx; *.xlsm; *.xls), *.xlsx; *.xlsm; *.xls", , "Sélectionnez l'ancien fichier CCI (optionnel)")
-    If Not (FileNameOldCCI = "False") Then
-        On Error Resume Next
-        Set wbOld = workbooks.Open(FileNameOldCCI)
-        On Error GoTo 0
-        If Not wbOld Is Nothing Then
-            hasOld = True
-
-            ' Feuilles source anciennes
-            Set wsEntOld = wbOld.Sheets("Entreprise")
-            Set wsDirOld = wbOld.Sheets("Dirigeant")
-            Set wsGarOld = wbOld.Sheets("Garant")
-            Set wsAssOld = wbOld.Sheets("Assureur")
-
-            lastRowEntOld = wsEntOld.Cells(wsEntOld.Rows.Count, 1).End(xlUp).Row
-            lastRowDirOld = wsDirOld.Cells(wsDirOld.Rows.Count, 1).End(xlUp).Row
-            lastRowGarOld = wsGarOld.Cells(wsGarOld.Rows.Count, 1).End(xlUp).Row
-            lastRowAssOld = wsAssOld.Cells(wsAssOld.Rows.Count, 1).End(xlUp).Row
-
-            ' Dictionnaires anciens
-            Set dictEntOld = CreateObject("Scripting.Dictionary")
-            Set dictDirOld = CreateObject("Scripting.Dictionary")
-            Set dictGarOld = CreateObject("Scripting.Dictionary")
-            Set dictMontOld = CreateObject("Scripting.Dictionary")
-
-            ' Map entreprises anciennes
-            For i = 2 To lastRowEntOld
-                key = CanonicalId(wsEntOld.Cells(i, 1).Value)
-                If Not dictEntOld.Exists(key) Then
-                    dictEntOld.Add key, Array(wsEntOld.Cells(i, 10).Value, wsEntOld.Cells(i, 8).Value) ' Société, SIREN
-                End If
-            Next i
-
-            ' Map dirigeants anciens (tous par ID) – Dénomination prioritaire
-            Set dictOldAllDirByID = CreateObject("Scripting.Dictionary")
-            For i = 2 To lastRowDirOld
-                key = CanonicalId(wsDirOld.Cells(i, 2).Value)
-                Dim oldDenom As String
-                Dim oldDisplay As String
-                oldDenom = Trim$(CStr(wsDirOld.Cells(i, 10).Value))
-                If Len(oldDenom) > 0 Then
-                    oldDisplay = oldDenom
-                Else
-                    oldDisplay = NormalizeDisplayName(wsDirOld.Cells(i, 3).Value, wsDirOld.Cells(i, 5).Value)
-                End If
-                canonKey = CanonicalKeyFromDisplay(oldDisplay)
-                If Len(canonKey) > 0 Then
-                    If Not dictOldAllDirByID.Exists(key) Then Set dictOldAllDirByID(key) = CreateObject("Scripting.Dictionary")
-                    If Not dictOldAllDirByID(key).Exists(canonKey) Then dictOldAllDirByID(key).Add canonKey, oldDisplay
-                    If Not dirKeyToDisplay.Exists(canonKey) Then dirKeyToDisplay.Add canonKey, oldDisplay
-                End If
-            Next i
-
-            ' Map garants et montants anciens (avec mêmes homonymes)
-            For i = 2 To lastRowGarOld
-                key = CanonicalId(wsGarOld.Cells(i, 2).Value)
-                Dim oldGarant As String
-                oldGarant = UCase(wsGarOld.Cells(i, 3).Value)
-
-                For Each cleHom In dictHom.Keys
-                    If InStr(1, oldGarant, cleHom, vbTextCompare) > 0 Then
-                        oldGarant = dictHom(cleHom)
-                        Exit For
-                    End If
-                Next cleHom
-
-                If Not dictGarOld.Exists(key) Then dictGarOld.Add key, oldGarant
-                If Not dictMontOld.Exists(key) Then dictMontOld.Add key, 0
-
-                montant = wsGarOld.Cells(i, 5).Value
-                If IsNumeric(montant) Then dictMontOld(key) = dictMontOld(key) + CDbl(montant)
-            Next i
-
-            ' (Assureurs anciens non nécessaires pour ce comparatif)
-
-            ' Sélection du dirigeant principal ancien par ID (même règle déterministe)
-            Set dictOldDirPrimary = CreateObject("Scripting.Dictionary")
-            Set dictOldDirPrimaryKeyMap = CreateObject("Scripting.Dictionary")
-            Dim idKey As Variant, minCanon As String, disp As String
-            For Each idKey In dictOldAllDirByID.Keys
-                minCanon = ""
-                For Each canonKey In dictOldAllDirByID(idKey).Keys
-                    If minCanon = "" Or canonKey < minCanon Then
-                        minCanon = canonKey
-                    End If
-                Next canonKey
-                If Len(minCanon) > 0 Then
-                    disp = dictOldAllDirByID(idKey)(minCanon)
-                    dictOldDirPrimary.Add idKey, disp
-                    dictOldDirPrimaryKeyMap.Add idKey, minCanon
-                    If Not dirKeyToDisplay.Exists(minCanon) Then dirKeyToDisplay.Add minCanon, disp
-                End If
-            Next idKey
-
-            ' Agrégats anciens par dirigeant (uniquement dirigeant principal)
-            Set dictOldDirSocCount = CreateObject("Scripting.Dictionary")
-            Set dictOldDirTotalGF = CreateObject("Scripting.Dictionary")
-
-    For Each key In dictEntOld.Keys
-        ' Utiliser Nom+Prénom ancien (dictOldDirPrimaryKeyMap déjà basé sur Nom+Prénom)
-        If dictOldDirPrimaryKeyMap.Exists(key) Then
-            dirCanon = CStr(dictOldDirPrimaryKeyMap(key))
-                    If Not dictOldDirSocCount.Exists(dirCanon) Then dictOldDirSocCount.Add dirCanon, 0
-                    dictOldDirSocCount(dirCanon) = dictOldDirSocCount(dirCanon) + 1
-
-                    If Not dictOldDirTotalGF.Exists(dirCanon) Then dictOldDirTotalGF.Add dirCanon, 0#
-                    If dictMontOld.Exists(key) Then
-                        If IsNumeric(dictMontOld(key)) Then dictOldDirTotalGF(dirCanon) = CDbl(dictOldDirTotalGF(dirCanon)) + CDbl(dictMontOld(key))
-                    End If
-                End If
-            Next key
-
-            wbOld.Close SaveChanges:=False
-        End If
-    End If
-
-    ' Construire l'ensemble des dirigeants (union actuel + ancien si présent)
-    Set allDirNames = CreateObject("Scripting.Dictionary")
-    If Not dictDirSocCount Is Nothing Then
-        For Each key In dictDirSocCount.Keys
-            If Not allDirNames.Exists(key) Then allDirNames.Add key, True
-        Next key
-    End If
-    If hasOld Then
-        If Not dictOldDirSocCount Is Nothing Then
-            For Each key In dictOldDirSocCount.Keys
-                If Not allDirNames.Exists(key) Then allDirNames.Add key, True
-            Next key
-        End If
-    End If
-
-    ' Créer la feuille de comparatif
-    Set wsComp = wbTarget.Sheets.Add(After:=wsTarget)
-    wsComp.Name = "ComparatifDirigeants"
-    wsComp.Cells(1, 1).Resize(1, 7).Value = Array("Dirigeant", "Total sociétés", "Garant principal", "Mouvement société", "Montant total GF", "Mouvement GF", "Plusieurs garants")
-
-    ' Remplir les données ligne à ligne
-    rowIndex = 2
-    For Each key In allDirNames.Keys
-        dirName = CStr(key)
-
-        ' Total sociétés actuel
-        Dim currSoc As Long
-        Dim oldSoc As Long
-        Dim currGF As Double
-        Dim oldGF As Double
-        Dim mouvementSoc As Long
-        Dim mouvementGF As Double
-
-        If dictDirSocCount.Exists(dirName) Then currSoc = CLng(dictDirSocCount(dirName)) Else currSoc = 0
-        If hasOld And Not dictOldDirSocCount Is Nothing Then
-            If dictOldDirSocCount.Exists(dirName) Then oldSoc = CLng(dictOldDirSocCount(dirName)) Else oldSoc = 0
-        Else
-            oldSoc = 0
-        End If
-        mouvementSoc = currSoc - oldSoc
-
-        If dictDirTotalGF.Exists(dirName) Then currGF = CDbl(dictDirTotalGF(dirName)) Else currGF = 0#
-        If hasOld And Not dictOldDirTotalGF Is Nothing Then
-            If dictOldDirTotalGF.Exists(dirName) Then oldGF = CDbl(dictOldDirTotalGF(dirName)) Else oldGF = 0#
-        Else
-            oldGF = 0#
-        End If
-        mouvementGF = currGF - oldGF
-
-        ' Garant principal actuel (par fréquence)
-        maxCount = -1
-        maxGarant = ""
-        If dictDirGarantFreq.Exists(dirName) Then
-            Set subDict = dictDirGarantFreq(dirName)
-            For Each valeur In subDict.Keys
-                If subDict(valeur) > maxCount Or (subDict(valeur) = maxCount And (maxGarant = "" Or CStr(valeur) < maxGarant)) Then
-                    maxCount = subDict(valeur)
-                    maxGarant = CStr(valeur)
-                End If
-            Next valeur
-        End If
+If dictDirTotalGF.Exists(dirName) Then currGF = CDbl(dictDirTotalGF(dirName)) Else currGF = 0#
+If hasOld And Not dictOldDirTotalGF Is Nothing Then
+If dictOldDirTotalGF.Exists(dirName) Then oldGF = CDbl(dictOldDirTotalGF(dirName)) Else oldGF = 0#
+Else
+oldGF = 0#
+End If
+mouvementGF = currGF - oldGF
 
         ' Affichage du nom du dirigeant à partir de la clé canonique
         If dirKeyToDisplay.Exists(dirName) Then
@@ -582,279 +840,269 @@ Sub ResumerCCI()
             wsComp.Cells(rowIndex, 1).Value = dirName
         End If
         wsComp.Cells(rowIndex, 2).Value = currSoc
-        wsComp.Cells(rowIndex, 3).Value = maxGarant
-        wsComp.Cells(rowIndex, 4).Value = mouvementSoc
-        wsComp.Cells(rowIndex, 5).Value = currGF
-        wsComp.Cells(rowIndex, 6).Value = mouvementGF
-        If dictDirGarantFreq.Exists(dirName) Then
-            If dictDirGarantFreq(dirName).Count > 1 Then
-                wsComp.Cells(rowIndex, 7).Value = "Oui"
+        
+        ' NEW: Colonne "Garant GS" - Oui/Non pour GALIAN-SMABTP
+        If dictDirHasGalian.Exists(dirName) Then
+            If dictDirHasGalian(dirName) Then
+                wsComp.Cells(rowIndex, 3).Value = "Oui"
+                wsComp.Cells(rowIndex, 3).Interior.Color = RGB(198, 239, 206)  ' Vert
             Else
-                wsComp.Cells(rowIndex, 7).Value = "Non"
+                wsComp.Cells(rowIndex, 3).Value = "Non"
             End If
         Else
-            wsComp.Cells(rowIndex, 7).Value = "Non"
+            wsComp.Cells(rowIndex, 3).Value = "Non"
         End If
+        
+        wsComp.Cells(rowIndex, 4).Value = mouvementSoc
 
-        rowIndex = rowIndex + 1
-    Next key
+wsComp.Cells(rowIndex, 5).Value = currGF
+wsComp.Cells(rowIndex, 6).Value = mouvementGF
+If dictDirGarantFreq.Exists(dirName) Then
+If dictDirGarantFreq(dirName).Count > 1 Then
+wsComp.Cells(rowIndex, 7).Value = "Oui"
+Else
+wsComp.Cells(rowIndex, 7).Value = "Non"
+End If
+Else
+wsComp.Cells(rowIndex, 7).Value = "Non"
+End If
 
-    ' Mise en forme tableau
-    Dim compRange As Range
-    Set compRange = wsComp.Range("A1").CurrentRegion
-    wsComp.ListObjects.Add(xlSrcRange, compRange, , xlYes).Name = "TableauComparatifDirigeants"
+rowIndex = rowIndex + 1
+Next key
 
-    ' Formats
-    wsComp.Columns("B:B").NumberFormat = "0"                    ' Total sociétés
-    wsComp.Columns("D:D").NumberFormat = "0"                    ' Mouvement société
-    wsComp.Columns("E:E").NumberFormat = "#,##0, ""K€"""       ' Montant total GF
-    wsComp.Columns("F:F").NumberFormat = "#,##0, ""K€"""       ' Mouvement GF
+' Mise en forme tableau
+Dim compRange As Range
+Set compRange = wsComp.Range("A1").CurrentRegion
+wsComp.ListObjects.Add(xlSrcRange, compRange, , xlYes).Name = "TableauComparatifDirigeants"
 
-    ' Alignements
-    wsComp.Columns("B:B").HorizontalAlignment = xlCenter
-    wsComp.Columns("D:D").HorizontalAlignment = xlCenter
+' Formats
+wsComp.Columns("B:B").NumberFormat = "0" ' Total sociétés
+wsComp.Columns("D:D").NumberFormat = "0" ' Mouvement société
+wsComp.Columns("E:E").NumberFormat = "#,##0, ""K€""" ' Montant total GF
+wsComp.Columns("F:F").NumberFormat = "#,##0, ""K€""" ' Mouvement GF
 
-    ' Mise en forme conditionnelle pour mouvements
-    Dim lastRowComp As Long
-    lastRowComp = wsComp.Cells(wsComp.Rows.Count, 1).End(xlUp).Row
-    If lastRowComp >= 2 Then
-        Dim rngMovSoc As Range, rngMovGF As Range
-        Set rngMovSoc = wsComp.Range("D2:D" & lastRowComp)
-        Set rngMovGF = wsComp.Range("F2:F" & lastRowComp)
+' Alignements
+wsComp.Columns("B:B").HorizontalAlignment = xlCenter
+wsComp.Columns("D:D").HorizontalAlignment = xlCenter
 
-        ' Mouvement société: >0 vert, <0 rouge
-        With rngMovSoc.FormatConditions.Add(Type:=xlCellValue, Operator:=xlGreater, Formula1:="0")
-            .Interior.Color = RGB(198, 239, 206) ' vert léger
-            .Font.Color = RGB(0, 97, 0)
-        End With
-        With rngMovSoc.FormatConditions.Add(Type:=xlCellValue, Operator:=xlLess, Formula1:="0")
-            .Interior.Color = RGB(255, 199, 206) ' rouge léger
-            .Font.Color = RGB(156, 0, 6)
-        End With
+' Mise en forme conditionnelle pour mouvements
+Dim lastRowComp As Long
+lastRowComp = wsComp.Cells(wsComp.Rows.Count, 1).End(xlUp).row
+If lastRowComp >= 2 Then
+Dim rngMovSoc As Range, rngMovGF As Range
+Set rngMovSoc = wsComp.Range("D2:D" & lastRowComp)
+Set rngMovGF = wsComp.Range("F2:F" & lastRowComp)
 
-        ' Mouvement GF: >0 vert, <0 rouge
-        With rngMovGF.FormatConditions.Add(Type:=xlCellValue, Operator:=xlGreater, Formula1:="0")
-            .Interior.Color = RGB(198, 239, 206)
-            .Font.Color = RGB(0, 97, 0)
-        End With
-        With rngMovGF.FormatConditions.Add(Type:=xlCellValue, Operator:=xlLess, Formula1:="0")
-            .Interior.Color = RGB(255, 199, 206)
-            .Font.Color = RGB(156, 0, 6)
-        End With
-    End If
+' Mouvement société: >0 vert, <0 rouge
+With rngMovSoc.FormatConditions.Add(Type:=xlCellValue, Operator:=xlGreater, Formula1:="0")
+.Interior.Color = RGB(198, 239, 206) ' vert léger
+.Font.Color = RGB(0, 97, 0)
+End With
+With rngMovSoc.FormatConditions.Add(Type:=xlCellValue, Operator:=xlLess, Formula1:="0")
+.Interior.Color = RGB(255, 199, 206) ' rouge léger
+.Font.Color = RGB(156, 0, 6)
+End With
 
-    wsComp.Columns.AutoFit
+' Mouvement GF: >0 vert, <0 rouge
+With rngMovGF.FormatConditions.Add(Type:=xlCellValue, Operator:=xlGreater, Formula1:="0")
+.Interior.Color = RGB(198, 239, 206)
+.Font.Color = RGB(0, 97, 0)
+End With
+With rngMovGF.FormatConditions.Add(Type:=xlCellValue, Operator:=xlLess, Formula1:="0")
+.Interior.Color = RGB(255, 199, 206)
+.Font.Color = RGB(156, 0, 6)
+End With
+End If
 
-    ' Champ "Nb garants (dirigeant)" désormais en zone Valeurs — aucun hack de ligne nécessaire
+wsComp.Columns.AutoFit
 
-    ' ==============================
-    ' Feuille de trace pour audit (IDs, dirigeants et principaux)
-    ' ==============================
-    Dim wsTrace As Worksheet
-    Dim allIds As Object
-    Dim idKey2 As Variant
-    Dim currDirList As String, oldDirList As String
-    Dim traceRow As Long
+' Champ "Nb garants (dirigeant)" désormais en zone Valeurs — aucun hack de ligne nécessaire
 
-    Set wsTrace = wbTarget.Sheets.Add(After:=wsComp)
-    wsTrace.Name = "TraceDirigeants"
-    wsTrace.Cells(1, 1).Resize(1, 7).Value = Array("ID", "Dirigeants (actuel)", "Principal (actuel)", "GF (actuel)", "Dirigeants (ancien)", "Principal (ancien)", "GF (ancien)")
+' ==============================
+' Feuille de trace pour audit (IDs, dirigeants et principaux)
+' ==============================
+Dim wsTrace As Worksheet
+Dim allIds As Object
+Dim idKey2 As Variant
+Dim currDirList As String, oldDirList As String
+Dim traceRow As Long
 
-    Set allIds = CreateObject("Scripting.Dictionary")
-    For Each key In dictEnt.Keys
-        If Not allIds.Exists(key) Then allIds.Add key, True
-    Next key
-    If hasOld Then
-        For Each key In dictEntOld.Keys
-            If Not allIds.Exists(key) Then allIds.Add key, True
-        Next key
-    End If
+Set wsTrace = wbTarget.Sheets.Add(After:=wsComp)
+wsTrace.Name = "TraceDirigeants"
+wsTrace.Cells(1, 1).Resize(1, 7).Value = Array("ID", "Dirigeants (actuel)", "Principal (actuel)", "GF (actuel)", "Dirigeants (ancien)", "Principal (ancien)", "GF (ancien)")
 
-    traceRow = 2
-    For Each idKey2 In allIds.Keys
-        wsTrace.Cells(traceRow, 1).Value = idKey2
+Set allIds = CreateObject("Scripting.Dictionary")
+For Each key In dictEnt.Keys
+If Not allIds.Exists(key) Then allIds.Add key, True
+Next key
+If hasOld Then
+For Each key In dictEntOld.Keys
+If Not allIds.Exists(key) Then allIds.Add key, True
+Next key
+End If
 
-        currDirList = ""
-        If Not dictAllDirByID Is Nothing Then
-            If dictAllDirByID.Exists(idKey2) Then
-                currDirList = JoinDictValues(dictAllDirByID(idKey2))
-            End If
-        End If
-        wsTrace.Cells(traceRow, 2).Value = currDirList
-        If dictDirPrimary.Exists(idKey2) Then wsTrace.Cells(traceRow, 3).Value = dictDirPrimary(idKey2)
-        If dictMont.Exists(idKey2) Then wsTrace.Cells(traceRow, 4).Value = dictMont(idKey2)
+traceRow = 2
+For Each idKey2 In allIds.Keys
+wsTrace.Cells(traceRow, 1).Value = idKey2
 
-        oldDirList = ""
-        If hasOld Then
-            If Not dictOldAllDirByID Is Nothing Then
-                If dictOldAllDirByID.Exists(idKey2) Then oldDirList = JoinDictValues(dictOldAllDirByID(idKey2))
-            End If
-            wsTrace.Cells(traceRow, 5).Value = oldDirList
-            If Not dictOldDirPrimary Is Nothing Then
-                If dictOldDirPrimary.Exists(idKey2) Then wsTrace.Cells(traceRow, 6).Value = dictOldDirPrimary(idKey2)
-            End If
-            If dictMontOld.Exists(idKey2) Then wsTrace.Cells(traceRow, 7).Value = dictMontOld(idKey2)
-        End If
+currDirList = ""
+If Not dictAllDirByID Is Nothing Then
+If dictAllDirByID.Exists(idKey2) Then
+currDirList = JoinDictValues(dictAllDirByID(idKey2))
+End If
+End If
+wsTrace.Cells(traceRow, 2).Value = currDirList
+If dictDirPrimary.Exists(idKey2) Then wsTrace.Cells(traceRow, 3).Value = dictDirPrimary(idKey2)
+If dictMont.Exists(idKey2) Then wsTrace.Cells(traceRow, 4).Value = dictMont(idKey2)
 
-        traceRow = traceRow + 1
-    Next idKey2
+oldDirList = ""
+If hasOld Then
+If Not dictOldAllDirByID Is Nothing Then
+If dictOldAllDirByID.Exists(idKey2) Then oldDirList = JoinDictValues(dictOldAllDirByID(idKey2))
+End If
+wsTrace.Cells(traceRow, 5).Value = oldDirList
+If Not dictOldDirPrimary Is Nothing Then
+If dictOldDirPrimary.Exists(idKey2) Then wsTrace.Cells(traceRow, 6).Value = dictOldDirPrimary(idKey2)
+End If
+If dictMontOld.Exists(idKey2) Then wsTrace.Cells(traceRow, 7).Value = dictMontOld(idKey2)
+End If
 
-    Dim traceRange As Range
-    Set traceRange = wsTrace.Range("A1").CurrentRegion
-    wsTrace.ListObjects.Add(xlSrcRange, traceRange, , xlYes).Name = "TableauTraceDirigeants"
-    wsTrace.Columns("D:D").NumberFormat = "#,##0, ""K€"""
-    wsTrace.Columns("G:G").NumberFormat = "#,##0, ""K€"""
-    wsTrace.Columns.AutoFit
+traceRow = traceRow + 1
+Next idKey2
 
-    wbTarget.Activate  ' Active le nouveau classeur
-    ' Vérification de cohérence: somme GF par dirigeant dans comparatif vs résumé
-    Dim dictGFResume As Object, dictGFComp As Object
-    Set dictGFResume = CreateObject("Scripting.Dictionary")
-    Set dictGFComp = CreateObject("Scripting.Dictionary")
-    Dim lo As ListObject, r As Long, last As Long, keyDir As String
-    Set lo = wsTarget.ListObjects("TableauResume")
-    last = lo.Range.Rows.Count
-    For r = 2 To last
-        keyDir = CStr(lo.Range.Cells(r, 5).Value)
-        If Len(keyDir) > 0 Then
-            If Not dictGFResume.Exists(keyDir) Then dictGFResume.Add keyDir, 0#
-            If IsNumeric(lo.Range.Cells(r, 7).Value) Then dictGFResume(keyDir) = CDbl(dictGFResume(keyDir)) + CDbl(lo.Range.Cells(r, 7).Value)
-        End If
-    Next r
+Dim traceRange As Range
+Set traceRange = wsTrace.Range("A1").CurrentRegion
+wsTrace.ListObjects.Add(xlSrcRange, traceRange, , xlYes).Name = "TableauTraceDirigeants"
+wsTrace.Columns("D:D").NumberFormat = "#,##0, ""K€"""
+wsTrace.Columns("G:G").NumberFormat = "#,##0, ""K€"""
+wsTrace.Columns.AutoFit
 
-    Dim compLast As Long
-    compLast = wsComp.Cells(wsComp.Rows.Count, 1).End(xlUp).Row
-    For r = 2 To compLast
-        keyDir = CStr(wsComp.Cells(r, 1).Value)
-        If Len(keyDir) > 0 Then
-            If Not dictGFComp.Exists(keyDir) Then dictGFComp.Add keyDir, 0#
-            If IsNumeric(wsComp.Cells(r, 5).Value) Then dictGFComp(keyDir) = CDbl(dictGFComp(keyDir)) + CDbl(wsComp.Cells(r, 5).Value)
-        End If
-    Next r
+wbTarget.Activate ' Active le nouveau classeur
+' Vérification de cohérence: somme GF par dirigeant dans comparatif vs résumé
+Dim dictGFResume As Object, dictGFComp As Object
+Set dictGFResume = CreateObject("Scripting.Dictionary")
+Set dictGFComp = CreateObject("Scripting.Dictionary")
+Dim lo As ListObject, z As Long, last As Long, keyDir As String
+Set lo = wsTarget.ListObjects("TableauResume")
+last = lo.Range.Rows.Count
+For z = 2 To last
+keyDir = CStr(lo.Range.Cells(z, 5).Value)
+If Len(keyDir) > 0 Then
+If Not dictGFResume.Exists(keyDir) Then dictGFResume.Add keyDir, 0#
+If IsNumeric(lo.Range.Cells(z, 7).Value) Then dictGFResume(keyDir) = CDbl(dictGFResume(keyDir)) + CDbl(lo.Range.Cells(z, 7).Value)
+End If
+Next z
 
-    Dim inconsistencies As Long: inconsistencies = 0
-    For Each key In dictGFResume.Keys
-        If dictGFComp.Exists(key) Then
-            If Abs(CDbl(dictGFResume(key)) - CDbl(dictGFComp(key))) > 0.5 Then inconsistencies = inconsistencies + 1
-        End If
-    Next key
+Dim compLast As Long
+compLast = wsComp.Cells(wsComp.Rows.Count, 1).End(xlUp).row
+For z = 2 To compLast
+keyDir = CStr(wsComp.Cells(z, 1).Value)
+If Len(keyDir) > 0 Then
+If Not dictGFComp.Exists(keyDir) Then dictGFComp.Add keyDir, 0#
+If IsNumeric(wsComp.Cells(z, 5).Value) Then dictGFComp(keyDir) = CDbl(dictGFComp(keyDir)) + CDbl(wsComp.Cells(z, 5).Value)
+End If
+Next z
 
-    Dim auditMsg As String
-    auditMsg = "Résumé, comparatif et trace créés."
-    If inconsistencies > 0 Then
-        auditMsg = auditMsg & " Alerte: " & inconsistencies & " incohérence(s) GF par dirigeant détectée(s)."
-    End If
-    MsgBox auditMsg
-    wbSource.Close SaveChanges:=False
-
-    ' Restaurer les options
-    Application.ScreenUpdating = prevScreenUpdating
-    Application.Calculation = prevCalculation
-    Application.EnableEvents = prevEnableEvents
+' Restaurer les options
+Application.ScreenUpdating = prevScreenUpdating
+Application.Calculation = prevCalculation
+Application.EnableEvents = prevEnableEvents
 
 End Sub
 
 Private Function NormalizeDisplayName(ByVal lastName As Variant, ByVal firstName As Variant) As String
-    Dim ln As String, fn As String
-    ln = Trim(CStr(lastName))
-    fn = Trim(CStr(firstName))
+Dim ln As String, fn As String
+ln = Trim(CStr(lastName))
+fn = Trim(CStr(firstName))
 
-    If Len(ln) = 0 And Len(fn) = 0 Then
-        NormalizeDisplayName = ""
-        Exit Function
-    End If
+If Len(ln) = 0 And Len(fn) = 0 Then
+NormalizeDisplayName = ""
+Exit Function
+End If
 
-    If Len(fn) > 0 Then
-        On Error Resume Next
-        fn = Application.WorksheetFunction.Proper(LCase(fn))
-        If Err.Number <> 0 Then
-            Err.Clear
-            On Error GoTo 0
-            fn = UCase(Left$(fn, 1)) & LCase(Mid$(fn, 2))
-        Else
-            On Error GoTo 0
-        End If
-        NormalizeDisplayName = UCase(ln) & " " & fn
-    Else
-        NormalizeDisplayName = UCase(ln)
-    End If
+If Len(fn) > 0 Then
+On Error Resume Next
+fn = Application.WorksheetFunction.Proper(LCase(fn))
+If Err.Number <> 0 Then
+Err.Clear
+On Error GoTo 0
+fn = UCase(Left$(fn, 1)) & LCase(Mid$(fn, 2))
+Else
+On Error GoTo 0
+End If
+NormalizeDisplayName = UCase(ln) & " " & fn
+Else
+NormalizeDisplayName = UCase(ln)
+End If
 End Function
 
 Private Function CanonicalKeyFromDisplay(ByVal displayName As String) As String
-    Dim t As String
-    t = UCase(Trim(displayName))
-    t = ReplaceAccents(t)
-    t = Replace(t, " ", "")
-    t = Replace(t, "-", "")
-    t = Replace(t, "'", "")
-    t = Replace(t, ".", "")
-    t = Replace(t, ",", "")
-    t = Replace(t, "_", "")
-    t = Replace(t, "(", "")
-    t = Replace(t, ")", "")
-    t = Replace(t, "/", "")
-    t = Replace(t, "\", "")
-    CanonicalKeyFromDisplay = t
+Dim t As String
+t = UCase(Trim(displayName))
+t = ReplaceAccents(t)
+t = Replace(t, " ", "")
+t = Replace(t, "-", "")
+t = Replace(t, "'", "")
+t = Replace(t, ".", "")
+t = Replace(t, ",", "")
+t = Replace(t, "_", "")
+t = Replace(t, "(", "")
+t = Replace(t, ")", "")
+t = Replace(t, "/", "")
+t = Replace(t, "\", "")
+CanonicalKeyFromDisplay = t
 End Function
 
 Private Function ReplaceAccents(ByVal s As String) As String
-    Dim r As String
-    r = s
-    ' A
-    r = Replace(r, "Á", "A"): r = Replace(r, "À", "A"): r = Replace(r, "Â", "A"): r = Replace(r, "Ä", "A"): r = Replace(r, "Ã", "A"): r = Replace(r, "Å", "A")
-    ' E
-    r = Replace(r, "É", "E"): r = Replace(r, "È", "E"): r = Replace(r, "Ê", "E"): r = Replace(r, "Ë", "E")
-    ' I
-    r = Replace(r, "Í", "I"): r = Replace(r, "Ì", "I"): r = Replace(r, "Î", "I"): r = Replace(r, "Ï", "I")
-    ' O
-    r = Replace(r, "Ó", "O"): r = Replace(r, "Ò", "O"): r = Replace(r, "Ô", "O"): r = Replace(r, "Ö", "O"): r = Replace(r, "Õ", "O")
-    ' U
-    r = Replace(r, "Ú", "U"): r = Replace(r, "Ù", "U"): r = Replace(r, "Û", "U"): r = Replace(r, "Ü", "U")
-    ' Y
-    r = Replace(r, "Ý", "Y"): r = Replace(r, "Ÿ", "Y")
-    ' C
-    r = Replace(r, "Ç", "C")
-    ' Special digraphs
-    r = Replace(r, "Œ", "OE"): r = Replace(r, "Æ", "AE")
-    ReplaceAccents = r
+Dim r As String
+r = s
+' A
+r = Replace(r, "Á", "A"): r = Replace(r, "À", "A"): r = Replace(r, "Â", "A"): r = Replace(r, "Ä", "A"): r = Replace(r, "Ã", "A"): r = Replace(r, "Å", "A")
+' E
+r = Replace(r, "É", "E"): r = Replace(r, "È", "E"): r = Replace(r, "Ê", "E"): r = Replace(r, "Ë", "E")
+' I
+r = Replace(r, "Í", "I"): r = Replace(r, "Ì", "I"): r = Replace(r, "Î", "I"): r = Replace(r, "Ï", "I")
+' O
+r = Replace(r, "Ó", "O"): r = Replace(r, "Ò", "O"): r = Replace(r, "Ô", "O"): r = Replace(r, "Ö", "O"): r = Replace(r, "Õ", "O")
+' U
+r = Replace(r, "Ú", "U"): r = Replace(r, "Ù", "U"): r = Replace(r, "Û", "U"): r = Replace(r, "Ü", "U")
+' Y
+r = Replace(r, "Ý", "Y"): r = Replace(r, "Ÿ", "Y")
+' C
+r = Replace(r, "Ç", "C")
+' Special digraphs
+r = Replace(r, "Œ", "OE"): r = Replace(r, "Æ", "AE")
+ReplaceAccents = r
 End Function
 
 Private Function CanonicalId(ByVal v As Variant) As String
-    Dim s As String
-    On Error Resume Next
-    s = CStr(v)
-    On Error GoTo 0
-    If Len(s) = 0 Then
-        CanonicalId = ""
-        Exit Function
-    End If
-    ' Normaliser espaces classiques et insécables
-    s = Replace(s, Chr$(160), " ")
-    s = Trim$(s)
-    CanonicalId = s
+Dim s As String
+On Error Resume Next
+s = CStr(v)
+On Error GoTo 0
+If Len(s) = 0 Then
+CanonicalId = ""
+Exit Function
+End If
+' Normaliser espaces classiques et insécables
+s = Replace(s, Chr$(160), " ")
+s = Trim$(s)
+CanonicalId = s
 End Function
 
 Private Function JoinDictValues(ByVal d As Object) As String
-    Dim k As Variant
-    Dim items() As String
-    Dim idx As Long
+Dim k As Variant
+Dim items() As String
+Dim idx As Long
 
-    If d Is Nothing Then
-        JoinDictValues = ""
-        Exit Function
-    End If
+If d Is Nothing Then
+JoinDictValues = ""
+Exit Function
+End If
 
-    If d.Count = 0 Then
-        JoinDictValues = ""
-        Exit Function
-    End If
+If d.Count = 0 Then
+JoinDictValues = ""
+Exit Function
+End If
 
-    ReDim items(0 To d.Count - 1)
-    idx = 0
-    For Each k In d.Keys
-        items(idx) = CStr(d(k))
-        idx = idx + 1
-    Next k
-
-    JoinDictValues = Join(items, ", ")
 End Function
